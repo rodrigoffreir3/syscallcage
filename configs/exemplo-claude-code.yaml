@@ -1,0 +1,16 @@
+mode: enforce
+filesystem:
+  allow_read:
+    - "**/*"
+  allow_write:
+    - "**/*"
+  deny_always:
+    - "**/.env"
+    - ".env"
+network:
+  allow_domains:
+    - "api.anthropic.com"
+    - "github.com"
+  deny_all_else: true
+syscalls:
+  deny: []

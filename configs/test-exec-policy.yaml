@@ -1,0 +1,13 @@
+mode: enforce
+filesystem:
+  allow_read:
+    - "**/*"
+    - "<erro_leitura>"
+  allow_write:
+    - "**/*"
+network:
+  allow_domains: []
+  deny_all_else: false
+syscalls:
+  deny:
+    - "execve:/bin/sh"

@@ -1,0 +1,6 @@
+[target.bpfel-unknown-none]
+linker = "bpf-linker"
+rustflags = ["-C", "link-arg=--llvm-args=-enable-mergefunc=false", "-C", "strip=symbols"]
+
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"

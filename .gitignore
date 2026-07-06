@@ -1,0 +1,29 @@
+# Artefatos gerados pelo bpf2go -- ficam direto em internal/monitor/,
+# sem subpasta bpf/ (o .c fonte fica em internal/monitor/bpf/, o gerado
+# não). Cada máquina/arquitetura gera o seu, nunca versiona.
+internal/monitor/*_bpfel.go
+internal/monitor/*_bpfeb.go
+internal/monitor/*.o
+
+# Binários compilados
+/syscallcage
+!/syscallcage/
+
+# Ambiente local e pacotes de entrega
+.env
+*.log
+*.tar.gz
+
+# Histórico interno de sessão de desenvolvimento (Antigravity/Claude) --
+# nunca pertence ao repositório público, é log de processo, não produto.
+historico-syscallcage/
+
+# Scripts de debug manual soltos -- o fluxo oficial de teste vive em scripts/
+/dummy_workload.py
+/dummy_workload.sh
+/test_pid.py
+/test_pid.sh
+
+# Rust compilation target directory
+target/
+
