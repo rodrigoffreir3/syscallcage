@@ -1,50 +1,49 @@
-# Agent Cage
+# SyscallCage
 
-**Deixe sua IA autônoma trabalhar sozinha — sem perder o controle sobre o que ela pode tocar.**
+**Deixe sua IA trabalhar sozinha no seu computador, sem medo do que ela pode fazer.**
 
-Você usa Claude Code, Cursor, ou qualquer agente de IA que edita arquivo e roda comando sozinho no seu computador. Funciona bem, mas sempre fica aquele friozinho: *e se ele ler meu `.env` sem eu perceber? E se um prompt malicioso escondido numa issue do GitHub fizer ele vazar minha API key? E se ele rodar algo destrutivo achando que tava ajudando?*
+## O problema
 
-O Agent Cage é a coleira invisível pra esse medo. Ele fica de olho no que o agente faz *dentro do próprio kernel do Linux* — não confia no que o agente promete, vê o que ele realmente executa — e aplica as regras que você definiu. Se ele tentar ler um arquivo de credencial, conectar num domínio não autorizado, ou rodar um shell suspeito, o Agent Cage mata o processo na hora. Sem sandbox pesado, sem copiar seu projeto pra nuvem, sem perder a velocidade de trabalhar local.
+Você usa um agente de IA (Claude Code, Cursor, ou parecido) que edita arquivos e roda comandos sozinho, sem você aprovar cada passo. É rápido e útil — mas sempre fica aquele desconforto: *e se ele ler minha senha sem eu perceber? E se mandar alguma coisa pra internet sem eu autorizar? E se rodar um comando perigoso achando que estava ajudando?*
 
-## ⚠️ Antes de instalar: isso roda em Linux, ponto
+## O que o SyscallCage faz
 
-Esta é uma limitação física, não uma escolha de roadmap adiável: o Agent Cage usa **eBPF**, uma tecnologia do kernel Linux. Não existe em Windows nativo, não existe em macOS. **WSL2 não é suportado** — testamos, o subsistema de kernel dele não expõe a superfície de eBPF necessária de forma confiável (correlação de PID entre namespace quebra silenciosamente). Se você está em Windows ou Mac, veja a seção [Windows e macOS](#windows-e-macos-o-que-seria-necessário) mais abaixo antes de tentar instalar.
+Ele fica de olho no que o agente **realmente faz** no seu computador — não no que ele diz que vai fazer. Você define regras simples (que pastas ele pode ler, que sites ele pode acessar, o que ele nunca pode rodar), e o SyscallCage garante isso na hora, sem depender do agente cooperar ou avisar antes.
 
-## Instalação
+Se o agente tentar abrir um arquivo de senha, ou conectar num site que você não autorizou, a ação é barrada ali mesmo — na maioria dos casos, antes mesmo dela acontecer.
 
-### Opção recomendada: compilação direta via Cargo
+## Onde ele atua
 
-O SyscallCage é escrito em Rust e eBPF (utilizando a biblioteca Aya). Você pode compilar o binário do userspace e do eBPF diretamente no seu ambiente de desenvolvimento.
+Direto no sistema operacional, na camada mais baixa que existe: o kernel do Linux. Isso significa que ele enxerga tudo o que qualquer programa faz de verdade — abrir arquivo, rodar comando, conectar na internet — sem depender do agente ter uma função especial de "avisar antes" (o que a maioria nem tem, e o que existe pode ser ignorado ou falhar).
 
-```bash
-git clone https://github.com/rodrigoffreir3/syscallcage.git
-cd syscallcage
+## Quando ele age
 
-# 1. Compile o bytecode do eBPF (exige Rust Nightly e bpf-linker)
-cargo +nightly build --package syscallcage-ebpf --target bpfel-unknown-none -Z build-std=core --release
+Toda vez, sem exceção. Não é uma checagem periódica nem uma revisão depois do fato — é vigilância contínua, enquanto o processo que você está protegendo estiver rodando.
 
-# 2. Compile o binário do userspace
-cargo build --release
-```
+## Por que ele é diferente
 
-Requisitos para compilar:
-- Rust (Stable e Nightly toolchains instalados via rustup).
-- `bpf-linker` instalado (`cargo install bpf-linker`).
+A abordagem mais comum hoje pra esse problema é colocar o agente inteiro dentro de uma caixa isolada — um ambiente virtual separado, tipo um computador dentro do computador. Funciona, mas tem um custo: é pesado, é lento pra configurar, e você perde a conveniência de trabalhar direto na sua pasta de projeto real, com seus arquivos de verdade.
 
-### Por que não Docker
+O SyscallCage não isola nada. Ele deixa o agente trabalhar exatamente onde ele já estava trabalhando — e observa, no nível mais fundo do sistema, se algo passa da linha. É a diferença entre trancar alguém numa sala vazia versus ter um segurança de confiança olhando o que a pessoa faz na sala de sempre. O resultado prático: você não perde velocidade nem muda seu fluxo de trabalho pra ganhar segurança.
 
-Decisão deliberada, não esquecimento: o SyscallCage precisa anexar eBPF no kernel do **host** e enxergar o PID do processo monitorado no namespace **real** da máquina. Rodar isso dentro de um container exigiria `--pid=host` e `--privileged` — o que anula praticamente todo o isolamento que Docker existe para oferecer, e reintroduz exatamente a classe de bug de mismatch de namespace que originalmente nos custou horas de debug no WSL2. Para esta ferramenta especificamente, dockerizar pioraria a segurança em vez de simplificar a instalação.
-
-## Uso
+## Como instalar
 
 ```bash
-sudo ./syscallcage --pid <PID-do-agente> --policy configs/exemplo.yaml
+curl -fsSL https://syscallcage.dev/install.sh | sh
 ```
 
-Hoje o binário exige `sudo` completo para anexar os programas eBPF. Isso é conhecido e não é o estado final desejado — ver [Roadmap](#roadmap) sobre restringir para capabilities específicas (`CAP_BPF`, `CAP_PERFMON`) em vez de root irrestrito.
+Isso baixa o programa pronto pra usar, sem precisar instalar nada além disso. Depois, confirme que está tudo certo:
+
+```bash
+syscallcage doctor
+```
+
+## Como usar
+
+Primeiro, escreva um arquivo pequeno dizendo o que é permitido:
 
 ```yaml
-mode: enforce  # ou "monitor", pra só observar sem matar nada
+mode: enforce
 
 filesystem:
   allow_read:
@@ -57,53 +56,38 @@ network:
   allow_domains:
     - "api.anthropic.com"
     - "github.com"
-  deny_all_else: true
-
-syscalls:
-  deny:
-    - "execve:/bin/sh"
 ```
 
-Zero trust de verdade: o que não foi explicitamente permitido é negado por padrão. `deny_always` sempre vence qualquer `allow`. Não tem exceção escondida, não tem modo debug que desliga a segurança sem querer.
+Depois, aponte o SyscallCage pro processo do seu agente:
 
-## Como funciona (pra quem quer saber)
+```bash
+sudo syscallcage --pid <PID-do-agente> --policy sua-politica.yaml
+```
 
-Um daemon eBPF observa as syscalls do processo do agente (e de qualquer processo filho que ele criar) em tempo real: abertura de arquivo, execução de comando, conexão de rede. Cada evento é comparado contra a política declarativa acima. Se a política é violada, o processo é encerrado (`SIGKILL`) ou apenas registrado, dependendo do modo escolhido.
+Pronto. Ele fica vigiando até o processo terminar ou você mandar parar.
 
-## Como funciona
+### Não sabe o que colocar nas regras?
 
-O SyscallCage suporta dois modos de operação automáticos:
-1. **Modo Síncrono (BPF LSM - Recomendado):** Se o kernel suportar BPF LSM (detectado via `/sys/kernel/security/lsm`), as requisições de filesystem e execve são interceptadas e negadas de forma síncrona diretamente no kernel, retornando `-EACCES` nativamente para o processo.
-2. **Modo Reativo (Tracepoints + Kprobes):** Caso o kernel não possua suporte ao LSM, ele realiza o fallback automático para o modo clássico, onde eventos de violação são monitorados e encerram o processo com `SIGKILL` reativamente.
+Deixe o SyscallCage descobrir sozinho, observando uma sessão real de uso:
 
-A rede e resolução DNS continuam reativas em ambos os modos.
+```bash
+sudo syscallcage --pid <PID> --policy configs/observar.yaml --log-file sessao.jsonl
+# deixe o agente trabalhar normalmente...
+syscallcage generate-policy --from-log sessao.jsonl --output minha-politica.yaml
+```
 
-## Limitações conhecidas (documentadas de propósito)
+Ele nunca sugere liberar arquivo de senha ou comando perigoso, mesmo que apareça na sessão observada — isso fica de fora por padrão, sempre.
 
-- Resolução de domínio via DNS assume resposta comprimida (padrão da imensa maioria dos servidores). Nome de domínio com mais de 10 níveis de subdomínio não é suportado no parsing atual.
-- IPv6 é bloqueado por padrão (fail-closed), não tem suporte funcional completo ainda.
-- Em caso de morte abrupta via `kill -9` no próprio `syscallcage`, o kernel Linux fecha automaticamente os descritores e descarrega todos os hooks eBPF instalados de forma limpa, não deixando ganchos órfãos no sistema.
+## Importante saber antes de instalar
 
-## Windows e macOS: o que seria necessário
-
-Sabemos que a necessidade de uma coleira de segurança para agente de IA é, se algo, **maior** para quem não é profissional de TI — o dev de infra já costuma ter instinto e ferramenta própria de contenção; quem não é técnico confia no agente por padrão, sem saber que existe alternativa. Isso nos importa, e vale registrar o caminho real, não só dizer "não dá":
-
-**Windows**: não existe eBPF nativo, mas existe **ETW (Event Tracing for Windows)**, a superfície de observação de kernel que antivírus e EDR comerciais usam no Windows. Portar a lógica de política (que já vive isolada em Rust puro, sem eBPF, nos pacotes `policy` e `enforcer`) para consumir eventos ETW em vez de ring buffer eBPF é trabalho real de engenharia, mas não é reescrita do zero — é escrever um novo monitor para Windows, mantendo o resto do produto.
-
-**macOS**: o equivalente seria o framework **EndpointSecurity** da Apple, que exige entitlement especial assinado pela Apple para monitorar outros processos — mais burocrático de distribuir que Linux ou Windows, mas tecnicamente viável.
-
-Nenhuns dos dois está no roadmap imediato — cada um é essencialmente um novo backend de observação, não um ajuste. Se isso te interessa como contribuidor, é exatamente o tipo de contribuição que a arquitetura atual (política e enforcement já desacoplados do monitor eBPF) foi desenhada para acomodar.
-
-## Roadmap
-
-- [ ] Capabilities específicas (`CAP_BPF`, `CAP_PERFMON`) em vez de exigir root completo.
-- [ ] Backend de monitor para Windows via ETW.
-- [ ] Backend de monitor para macOS via EndpointSecurity.
+- **Só funciona em Linux.** A tecnologia usada (eBPF) é do kernel Linux — não existe em Windows nem Mac hoje. Rodar dentro do WSL2 (Linux dentro do Windows) também não funciona de forma confiável — testamos.
+- **Pede permissão de administrador (`sudo`) pra rodar**, porque precisa de acesso profundo ao sistema pra fazer esse tipo de vigilância. Isso é esperado e necessário pra esse tipo de ferramenta.
+- Documentamos abertamente os limites atuais do projeto — nenhuma promessa exagerada. Veja a seção de limitações no repositório.
 
 ## Licença
 
-MPL 2.0 — modifique, use comercialmente, distribua. A única exigência é que mudanças nos arquivos deste projeto continuem abertas sob a mesma licença; o resto do seu projeto pode ser proprietário sem problema.
+Código aberto, licença MPL 2.0. Use, modifique, e use até comercialmente — só pedimos que mudanças feitas nos arquivos deste projeto continuem abertas também.
 
 ## Por que existe
 
-Ferramenta nascida da mesma linha de pesquisa do [Imunno System](https://github.com/SEU-USUARIO) (EDR baseado em eBPF, patente INPI), aplicando detecção comportamental de kernel a um problema novo: confiar em agente de IA autônomo sem abrir mão de segurança.
+Nasceu da mesma pesquisa por trás do Imunno System, um antivírus de comportamento para servidores Linux com patente registrada no Brasil. O SyscallCage aplica a mesma ideia — observar comportamento real, não confiar em promessa — a um problema novo: deixar IA trabalhar sozinha sem abrir mão de segurança.
