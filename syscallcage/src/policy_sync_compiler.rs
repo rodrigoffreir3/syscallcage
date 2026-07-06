@@ -1,4 +1,4 @@
-use crate::policy::{Policy, SyscallRule};
+use crate::policy::Policy;
 use thiserror::Error;
 
 #[derive(Debug, Error, PartialEq, Eq)]

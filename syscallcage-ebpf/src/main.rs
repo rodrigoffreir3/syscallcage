@@ -8,7 +8,7 @@ use aya_ebpf::{
     programs::{LsmContext, ProbeContext, TracePointContext},
     helpers::{
         bpf_get_current_pid_tgid, bpf_probe_read_user, bpf_probe_read_user_buf,
-        bpf_probe_read_user_str_bytes, bpf_probe_read_kernel, bpf_d_path, bpf_send_signal,
+        bpf_probe_read_user_str_bytes, bpf_d_path, bpf_send_signal,
     },
     bindings::{file, path, linux_binprm},
 };
@@ -169,7 +169,7 @@ pub fn handle_fork(ctx: TracePointContext) -> u32 {
 
     if parent_pid > 0 && child_pid > 0 {
         if is_monitored(parent_pid as u32) {
-            let _ = unsafe { MONITORED_PIDS.insert(child_pid as u32, 1u8, 0) };
+            let _ = MONITORED_PIDS.insert(child_pid as u32, 1u8, 0);
         }
     }
     0
@@ -181,7 +181,7 @@ pub fn handle_fork(ctx: TracePointContext) -> u32 {
 #[tracepoint(category = "sched", name = "sched_process_exit")]
 pub fn handle_exit(ctx: TracePointContext) -> u32 {
     let pid: i32 = unsafe { ctx.read_at(24) }.unwrap_or(0);
-    let _ = unsafe { MONITORED_PIDS.remove(pid as u32) };
+    let _ = MONITORED_PIDS.remove(pid as u32);
     0
 }
 
@@ -273,7 +273,7 @@ pub fn handle_sendto(ctx: TracePointContext) -> u32 {
 
     let mut payload = [0u8; 256];
     payload.copy_from_slice(&scratch_ref[..256]);
-    let _ = unsafe { PENDING_DNS_QUERY.insert(tx_id, &payload, 0) };
+    let _ = PENDING_DNS_QUERY.insert(tx_id, &payload, 0);
     0
 }
 
@@ -286,7 +286,7 @@ pub fn handle_enter_recvfrom(ctx: TracePointContext) -> u32 {
     let pid = (pid_tgid >> 32) as u32;
     if !is_monitored(pid) { return 0; }
     let ubuf_ptr: *const u8 = unsafe { ctx.read_at(24) }.unwrap_or(core::ptr::null());
-    let _ = unsafe { DNS_RECV_BUFF.insert(pid_tgid, &(ubuf_ptr as u64), 0) };
+    let _ = DNS_RECV_BUFF.insert(pid_tgid, &(ubuf_ptr as u64), 0);
     0
 }
 
@@ -303,7 +303,7 @@ pub fn handle_exit_recvfrom(ctx: TracePointContext) -> u32 {
         Some(val) => *val,
         None => return 0,
     };
-    let _ = unsafe { DNS_RECV_BUFF.remove(&pid_tgid) };
+    let _ = DNS_RECV_BUFF.remove(&pid_tgid);
 
     let ret: i64 = unsafe { ctx.read_at(16) }.unwrap_or(0);
     if ret <= 12 { return 0; }
@@ -314,7 +314,7 @@ pub fn handle_exit_recvfrom(ctx: TracePointContext) -> u32 {
         Err(_) => return 0,
     };
 
-    let _ = unsafe { PENDING_DNS_QUERY.remove(&tx_id) };
+    let _ = PENDING_DNS_QUERY.remove(&tx_id);
 
     // Emite evento com os bytes brutos da resposta DNS para o userspace parsear
     if let Some(mut entry) = EVENTS.reserve::<BpfEvent>(0) {
@@ -361,7 +361,7 @@ pub fn handle_connect(ctx: TracePointContext) -> u32 {
         let port = ((sa6[2] as u16) << 8) | (sa6[3] as u16);
         if port == 53 {
             let key = ((pid as u64) << 32) | (fd as u32 as u64);
-            let _ = unsafe { DNS_FDS.insert(&key, &1u8, 0) };
+            let _ = DNS_FDS.insert(&key, &1u8, 0);
             return 0;
         }
         // Loopback IPv6 (::1)
@@ -388,7 +388,7 @@ pub fn handle_connect(ctx: TracePointContext) -> u32 {
     let port = ((sa[2] as u16) << 8) | (sa[3] as u16);
     if port == 53 {
         let key = ((pid as u64) << 32) | (fd as u32 as u64);
-        let _ = unsafe { DNS_FDS.insert(&key, &1u8, 0) };
+        let _ = DNS_FDS.insert(&key, &1u8, 0);
         return 0;
     }
 
@@ -516,7 +516,7 @@ pub fn lsm_file_open(ctx: LsmContext) -> i32 {
         return 0;
     }
 
-    let file_ptr: *mut file = unsafe { ctx.arg(0) };
+    let file_ptr: *mut file = ctx.arg(0);
     if file_ptr.is_null() {
         return 0;
     }
@@ -524,7 +524,7 @@ pub fn lsm_file_open(ctx: LsmContext) -> i32 {
     let path_offset = get_f_path_offset();
     let path_ptr = unsafe { (file_ptr as *const u8).add(path_offset as usize) as *mut path };
 
-    let scratch_ptr = match unsafe { SCRATCH_PATH.get_ptr_mut(0) } {
+    let scratch_ptr = match SCRATCH_PATH.get_ptr_mut(0) {
         Some(ptr) => ptr,
         None => return 0,
     };
@@ -623,7 +623,7 @@ pub fn lsm_exec_check(ctx: LsmContext) -> i32 {
         return 0;
     }
 
-    let bprm: *mut linux_binprm = unsafe { ctx.arg(0) };
+    let bprm: *mut linux_binprm = ctx.arg(0);
     if bprm.is_null() {
         return 0;
     }
@@ -637,7 +637,7 @@ pub fn lsm_exec_check(ctx: LsmContext) -> i32 {
     let path_offset = get_f_path_offset();
     let path_ptr = unsafe { (file_ptr as *const u8).add(path_offset as usize) as *mut path };
 
-    let scratch_ptr = match unsafe { SCRATCH_PATH.get_ptr_mut(0) } {
+    let scratch_ptr = match SCRATCH_PATH.get_ptr_mut(0) {
         Some(ptr) => ptr,
         None => return 0,
     };
@@ -686,7 +686,7 @@ pub fn lsm_exec_check(ctx: LsmContext) -> i32 {
 
 #[cfg(target_arch = "bpf")]
 #[tracepoint(category = "syscalls", name = "sys_enter_ptrace")]
-pub fn handle_ptrace(ctx: TracePointContext) -> u32 {
+pub fn handle_ptrace(_ctx: TracePointContext) -> u32 {
     let pid = (bpf_get_current_pid_tgid() >> 32) as u32;
     if !is_monitored(pid) {
         return 0;
