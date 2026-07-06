@@ -1,5 +1,7 @@
 # SyscallCage (SCC)
 
+**O SCC atualmente é um MVP em constante validação e evolução. Serei imensamente grato se quiser ajudar no desenvolvimento do MVP com comentário construtivo e direcional. Por favor, mantenha a educação e o decoro. Os comentários podem ser feitos na pagina oficial do projeto (link abaixo) na área de comentários. Grato pela sua compreensão e apoio.
+
 **A coleira que faz sua IA trabalhar sozinha, no seu computador, sem medo do que ela pode fazer.**
 
 > 🔭 **Página oficial e documentação completa:** [rodrigofreire.pages.dev/syscallcage](https://rodrigofreire.pages.dev/syscallcage)
