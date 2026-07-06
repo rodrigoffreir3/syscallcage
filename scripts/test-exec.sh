@@ -9,8 +9,8 @@ WORKLOAD_PID=$!
 
 echo "Started workload with PID $WORKLOAD_PID"
 
-# Start agent-cage in background with the test-exec-policy
-sudo ./agent-cage --pid $WORKLOAD_PID --policy configs/test-exec-policy.yaml &
+# Start syscallcage in background with the test-exec-policy
+sudo ./target/release/syscallcage --pid $WORKLOAD_PID --policy configs/test-exec-policy.yaml &
 CAGE_PID=$!
 
 # Wait for workload

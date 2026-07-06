@@ -1,15 +1,10 @@
 #!/bin/bash
 set -e
 
-# Build the agent-cage binary if it doesn't exist
-if [ ! -f ./agent-cage ]; then
-  echo "Building agent-cage..."
-  go generate ./...
-  go build -o agent-cage ./cmd/agent-cage
-fi
+# Run directly using the compiled release target binary
 
 # Create a test directory in the native Linux filesystem to avoid WSL2 9p filesystem tracepoint bugs
-TEST_DIR="/tmp/agent-cage-test"
+TEST_DIR="/tmp/syscallcage-test"
 mkdir -p $TEST_DIR
 
 echo "SECRET=12345" > $TEST_DIR/.env
@@ -40,10 +35,10 @@ DUMMY_PID=$!
 cd - > /dev/null
 
 echo "Dummy process PID: $DUMMY_PID"
-echo "Applying agent-cage policy..."
+echo "Applying syscallcage policy..."
 
-# Run agent-cage to monitor the dummy process
-sudo ./agent-cage --pid $DUMMY_PID --policy configs/exemplo-claude-code.yaml &
+# Run syscallcage to monitor the dummy process (sem sudo: setcap já garante as caps necessárias)
+./target/release/syscallcage --pid $DUMMY_PID --policy configs/exemplo-claude-code.yaml &
 CAGE_PID=$!
 
 # Give the dummy script time to wake up and read the file
@@ -53,13 +48,13 @@ echo "Checking if dummy process was killed..."
 if kill -0 $DUMMY_PID 2>/dev/null; then
   echo "❌ E2E Test Failed: Dummy process is still alive! The policy did not enforce the restriction."
   # Cleanup
-  sudo kill $CAGE_PID || true
+  kill $CAGE_PID 2>/dev/null || true
   kill $DUMMY_PID || true
   rm -rf $TEST_DIR
   exit 1
 else
-  echo "✅ E2E Test Passed: Dummy process was successfully killed by agent-cage."
-  sudo kill $CAGE_PID 2>/dev/null || true
+  echo "✅ E2E Test Passed: Dummy process was successfully killed by syscallcage."
+  kill $CAGE_PID 2>/dev/null || true
   rm -rf $TEST_DIR
   exit 0
 fi

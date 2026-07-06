@@ -17,12 +17,12 @@ Limitações Conhecidas (Design de MVP BPF)
 * Limite de Subdomínios (10 Labels): Devido às restrições do BPF Verifier de saltos em loops não determinísticos, o loop que lê o QNAME (nome pesquisado) salta no máximo 10 segmentos (labels separados por ponto). Domínios com mais de 10 níveis de profundidade vão quebrar o parsing, enviando o offset pra posição errada, resultando no descarte daquela resposta DNS.
 * Ação Reativa (Kill Assíncrono): A ação de encerramento (kill) é disparada em Userspace após consumir o evento do Ring Buffer eBPF, sendo reativa/assíncrona e não preventiva/síncrona (como seria por LSM BPF ou seccomp). Isso significa que o processo cobaia pode conseguir concluir ou obter retorno do syscall antes do recebimento do sinal SIGKILL.
 Arquitetura mínima
-agent-cage run --policy claude-code.yaml --pid <PID_do_agente>
+syscallcage run --policy claude-code.yaml --pid <PID_do_agente>
      │
      ├── internal/policy    → parse do YAML, validação
      ├── internal/monitor   → attach eBPF (tracepoint syscalls: openat, connect, execve)
      ├── internal/enforcer  → decide: permitir / logar / matar
-     └── cmd/agent-cage     → CLI (cobra ou flag simples, sem framework pesado)
+     └── cmd/syscallcage     → CLI (cobra ou flag simples, sem framework pesado)
 Política declarativa — exemplo mínimo
 # configs/claude-code.yaml
 mode: enforce   # ou "monitor" para só logar sem matar
@@ -60,6 +60,6 @@ internal/policy: parser + validador do YAML, com testes — zero eBPF envolvido 
 internal/enforcer: dado um "evento" simulado (struct Go, não syscall real ainda), decide permitir/logar/matar — testável sem kernel.
 internal/monitor: aqui entra eBPF de verdade (tracepoint em sys_enter_openat, sys_enter_connect, sys_enter_execve), primeiro só logando (modo monitor), sem matar nada.
 Conectar monitor → enforcer → ação real de matar processo (SIGKILL via PID), só depois que 1-3 estiverem testados e estáveis.
-CLI (cmd/agent-cage) por último — é a parte menos arriscada.
+CLI (cmd/syscallcage) por último — é a parte menos arriscada.
 Stack
 Go + cilium/ebpf (biblioteca, não precisa de bcc/python, compila estático, mesma stack do Imunno). YAML via gopkg.in/yaml.v3. Zero framework CLI pesado — flag da stdlib ou spf13/cobra se quiser subcomando bonito.

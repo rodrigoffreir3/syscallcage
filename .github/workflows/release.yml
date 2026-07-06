@@ -1,0 +1,54 @@
+# .github/workflows/release.yml
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-unknown-linux-gnu
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instala toolchain Rust (stable + nightly p/ eBPF)
+        run: |
+          rustup toolchain install stable
+          rustup toolchain install nightly --component rust-src
+          rustup target add ${{ matrix.target }}
+
+      - name: Instala bpf-linker e cross tooling
+        run: |
+          cargo install bpf-linker
+          sudo apt-get update && sudo apt-get install -y clang llvm gcc-aarch64-linux-gnu
+
+      - name: Compila eBPF (bpfel-unknown-none, sempre native, não cross)
+        run: |
+          cargo +nightly build --package syscallcage-ebpf \
+            --target bpfel-unknown-none -Z build-std=core --release
+
+      - name: Compila userspace para o target da matriz
+        run: cargo build --release --target ${{ matrix.target }} --bin syscallcage
+
+      - name: Empacota binário + eBPF juntos
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/syscallcage dist/
+          cp target/bpfel-unknown-none/release/syscallcage-ebpf dist/
+          tar -czf syscallcage-${{ matrix.target }}.tar.gz -C dist .
+
+      - name: Gera checksum
+        run: sha256sum syscallcage-${{ matrix.target }}.tar.gz > syscallcage-${{ matrix.target }}.tar.gz.sha256
+
+      - name: Upload artefato da release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            syscallcage-${{ matrix.target }}.tar.gz
+            syscallcage-${{ matrix.target }}.tar.gz.sha256

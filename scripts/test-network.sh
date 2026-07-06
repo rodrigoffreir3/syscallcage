@@ -15,8 +15,8 @@ WORKLOAD_PID=$!
 
 echo "Started workload with PID $WORKLOAD_PID testing $TARGET_HOST"
 
-# Start agent-cage in background
-sudo ./agent-cage --pid $WORKLOAD_PID --policy configs/exemplo-claude-code.yaml &
+# Start syscallcage in background
+sudo ./target/release/syscallcage --pid $WORKLOAD_PID --policy configs/exemplo-claude-code.yaml &
 CAGE_PID=$!
 
 # Wait for workload to finish

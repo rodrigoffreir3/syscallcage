@@ -9,7 +9,7 @@ WORKLOAD_PID=$!
 
 echo "Started workload with PID $WORKLOAD_PID"
 
-sudo ./agent-cage --pid $WORKLOAD_PID --policy configs/exemplo-claude-code.yaml &
+sudo ./target/release/syscallcage --pid $WORKLOAD_PID --policy configs/exemplo-claude-code.yaml &
 CAGE_PID=$!
 
 sleep 8
