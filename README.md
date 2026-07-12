@@ -10,7 +10,6 @@
 
 O SyscallCage está em evolução ativa. Já funciona hoje, de ponta a ponta, em Linux — e o roadmap público já garante que você não vai ficar esperando no escuro:
 
-- **Modo `watch`** — o SyscallCage nasce como pai do seu agente, protegendo desde o primeiro milissegundo de vida do processo, sobrevivendo a restart automaticamente.
 - **Bloqueio síncrono de rede** — hoje já bloqueamos filesystem e execução de comando *antes* deles acontecerem via BPF LSM; rede é o próximo alvo dessa mesma technologia.
 - **Windows (via ETW)** e **macOS (via EndpointSecurity)** — a mesma filosofia de vigilância no kernel, adaptada pra quem não vive em Linux.
 - **Capabilities refinadas** (`CAP_BPF`, `CAP_PERFMON`) no lugar de root completo — menos privilégio, mesma proteção.
@@ -43,6 +42,18 @@ O SyscallCage não isola nada. Ele deixa o agente trabalhar exatamente onde já 
 
 ## Como instalar
 
+Instalação em um comando só (baixa o binário já compilado da release, checksum verificado — nenhuma compilação acontece na sua máquina):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rodrigoffreir3/syscallcage/main/install.sh | sh
+```
+
+Isso instala em `~/.local/bin`, sem exigir `sudo` para o passo de instalação em si. Ao final, confira o ambiente com `syscallcage doctor`.
+
+*(A URL acima usa o GitHub diretamente — é a versão honesta de "funciona hoje". Um domínio próprio é melhoria futura documentada no roadmap.)*
+
+### Instalando a partir do código-fonte
+
 ```bash
 git clone https://github.com/rodrigoffreir3/syscallcage
 cd syscallcage
@@ -50,8 +61,6 @@ cargo build --release --workspace
 ```
 
 Requisitos: Rust (stable + nightly via rustup), `bpf-linker` (`cargo install bpf-linker`), `clang`/`llvm`.
-
-*(Instalação de um comando só, via `curl | sh`, está a caminho — acompanhe na [página oficial](https://rodrigofreire.pages.dev/syscallcage).)*
 
 ## Como usar
 
@@ -110,13 +119,13 @@ Vamos abrir ele. Cada parte tem um motivo:
 
 Se um dia você precisar pesquisar sobre isso no Google, já sabe o nome de cada peça: "PID", "sudo", "flag de linha de comando". Isso ajuda muito mais que decorar o comando inteiro sem entender.
 
-## O modo `watch` (chegando em breve) — a versão sem precisar descobrir PID
+## O modo `watch` — a versão sem precisar descobrir PID
 
 ```bash
 sudo syscallcage watch --policy minha-politica.yaml -- claude-code --seus-argumentos
 ```
 
-Essa versão futura elimina o passo mais chato (achar o PID manualmente). Explicando cada parte nova:
+Esse modo elimina o passo mais chato (achar o PID manualmente): o SyscallCage cria o processo do agente com `fork`+`exec`, sabendo o PID no instante em que ele nasce, e reinicia automaticamente em caso de crash normal — nunca em caso de violação de política, que sempre exige intervenção humana. Se o `syscallcage` for morto, o agente recebe `SIGTERM` junto (via `PR_SET_PDEATHSIG`): "parado" é sempre preferível a "rodando sem proteção". Explicando cada parte nova:
 
 - **`watch`** — diz pro SyscallCage "não é pra vigiar um processo que já existe, é pra você mesmo criar e tomar conta dele desde o nascimento".
 - **`--policy minha-politica.yaml`** — igual antes, o arquivo de regras.

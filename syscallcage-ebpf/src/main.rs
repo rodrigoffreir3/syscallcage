@@ -14,8 +14,28 @@ use aya_ebpf::{
         bpf_get_current_pid_tgid, bpf_probe_read_user, bpf_probe_read_user_buf,
         bpf_probe_read_user_str_bytes, bpf_d_path, bpf_send_signal,
     },
-    bindings::{file, path, linux_binprm},
 };
+
+#[cfg(target_arch = "bpf")]
+#[repr(C)]
+pub struct path {
+    pub mnt: *mut core::ffi::c_void,
+    pub dentry: *mut core::ffi::c_void,
+}
+
+#[cfg(target_arch = "bpf")]
+#[repr(C)]
+pub struct file {
+    pub _padding: [u8; 64],
+    pub f_path: path,
+}
+
+#[cfg(target_arch = "bpf")]
+#[repr(C)]
+pub struct linux_binprm {
+    pub _padding: [u8; 64],
+    pub file: *mut file,
+}
 
 #[cfg(target_arch = "bpf")]
 const EVENT_TYPE_READ: u32 = 1;
@@ -142,21 +162,10 @@ fn get_f_mode_offset() -> u32 {
     unsafe { OFFSETS.get(&3) }.map(|v| *v).unwrap_or(4)
 }
 
-/// Obtém o offset dinâmico de f_path (struct file) ou seu fallback (64)
-#[cfg(target_arch = "bpf")]
-#[inline(always)]
-#[link_section = ".text"]
-fn get_f_path_offset() -> u32 {
-    unsafe { OFFSETS.get(&4) }.map(|v| *v).unwrap_or(64)
-}
-
-/// Obtém o offset dinâmico de file (struct linux_binprm) ou seu fallback (64)
-#[cfg(target_arch = "bpf")]
-#[inline(always)]
-#[link_section = ".text"]
-fn get_bprm_file_offset() -> u32 {
-    unsafe { OFFSETS.get(&5) }.map(|v| *v).unwrap_or(64)
-}
+// f_path e linux_binprm.file não usam mais offset manual (OFFSETS 4/5): o
+// acesso agora é via campo tipado (&raw mut (*ptr).campo), que preserva
+// proveniência BTF exigida por bpf_d_path. Ver GT-13. O offset de f_mode
+// (índice 3) continua via OFFSETS pois bpf_probe_read_kernel não exige tipo.
 
 // ── Programas eBPF ───────────────────────────────────────────────────────────
 
@@ -525,8 +534,9 @@ pub fn lsm_file_open(ctx: LsmContext) -> i32 {
         return 0;
     }
 
-    let path_offset = get_f_path_offset();
-    let path_ptr = unsafe { (file_ptr as *const u8).add(path_offset as usize) as *mut path };
+    // Acesso de campo direto (não offset manual + soma de ponteiro): preserva
+    // a proveniência de tipo BTF exigida por bpf_d_path. Ver GT-13.
+    let path_ptr = unsafe { &raw mut (*file_ptr).f_path };
 
     let scratch_ptr = match SCRATCH_PATH.get_ptr_mut(0) {
         Some(ptr) => ptr,
@@ -540,13 +550,20 @@ pub fn lsm_file_open(ctx: LsmContext) -> i32 {
         buf[i] = 0;
     }
 
-    let ret = unsafe { bpf_d_path(path_ptr, buf.as_mut_ptr() as *mut i8, 256) };
+    let ret = unsafe { bpf_d_path(path_ptr as *mut aya_ebpf::bindings::path, buf.as_mut_ptr() as *mut i8, 256) };
     if ret < 0 {
         return -13; // -EACCES
     }
 
     let f_mode_offset = get_f_mode_offset();
-    let f_mode = unsafe { *((file_ptr as *const u8).add(f_mode_offset as usize) as *const u32) };
+    let mut f_mode: u32 = 0;
+    unsafe {
+        let _ = aya_ebpf::helpers::bpf_probe_read_kernel(
+            &mut f_mode as *mut u32 as *mut core::ffi::c_void,
+            4,
+            (file_ptr as *const u8).add(f_mode_offset as usize) as *const core::ffi::c_void,
+        );
+    }
     let is_write = (f_mode & 2) != 0; // FMODE_WRITE
 
     // 1. Verificar caminhos sensíveis proibidos por especificação (.env, .ssh/, etc.)
@@ -632,14 +649,13 @@ pub fn lsm_exec_check(ctx: LsmContext) -> i32 {
         return 0;
     }
 
-    let bprm_file_offset = get_bprm_file_offset();
-    let file_ptr = unsafe { *((bprm as *const u8).add(bprm_file_offset as usize) as *const *mut file) };
+    let file_ptr = unsafe { (*bprm).file };
     if file_ptr.is_null() {
         return 0;
     }
 
-    let path_offset = get_f_path_offset();
-    let path_ptr = unsafe { (file_ptr as *const u8).add(path_offset as usize) as *mut path };
+    // Mesmo padrão de lsm_file_open: acesso de campo direto preserva tipo BTF. GT-13.
+    let path_ptr = unsafe { &raw mut (*file_ptr).f_path };
 
     let scratch_ptr = match SCRATCH_PATH.get_ptr_mut(0) {
         Some(ptr) => ptr,
@@ -653,7 +669,7 @@ pub fn lsm_exec_check(ctx: LsmContext) -> i32 {
         buf[i] = 0;
     }
 
-    let ret = unsafe { bpf_d_path(path_ptr, buf.as_mut_ptr() as *mut i8, 256) };
+    let ret = unsafe { bpf_d_path(path_ptr as *mut aya_ebpf::bindings::path, buf.as_mut_ptr() as *mut i8, 256) };
     if ret < 0 {
         return -13; // -EACCES
     }

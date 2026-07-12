@@ -21,6 +21,14 @@ pub enum Action {
     Kill,
 }
 
+/// Motivo pelo qual um processo supervisionado (`watch`) foi encerrado.
+/// Usado pelo loop de supervisão para decidir se reinicia ou não: violação
+/// de política nunca deve gerar reinício automático (ver spec GT-12).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KillReason {
+    PolicyViolation,
+}
+
 pub struct Event {
     pub pid: u32,
     pub event_type: EventType,

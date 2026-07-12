@@ -8,6 +8,7 @@ pub mod enforcer;
 pub mod monitor;
 pub mod policy_generator;
 pub mod policy_sync_compiler;
+pub mod watch;
 
 use clap::Parser;
 use std::sync::Arc;
@@ -43,6 +44,17 @@ enum Subcommands {
     },
     #[command(name = "doctor", about = "Realiza diagnósticos do ambiente operacional")]
     Doctor,
+    #[command(name = "watch", about = "Cria e supervisiona o processo do agente desde o nascimento")]
+    Watch {
+        #[arg(long, help = "Caminho para o arquivo YAML de política")]
+        policy: std::path::PathBuf,
+
+        #[arg(long, help = "Número máximo de reinícios automáticos (padrão: ilimitado)")]
+        max_restarts: Option<u32>,
+
+        #[arg(last = true, required = true, help = "Comando do agente a ser executado e supervisionado")]
+        command: Vec<String>,
+    },
 }
 
 #[tokio::main]
@@ -60,6 +72,18 @@ async fn main() {
             }
             Subcommands::Doctor => {
                 run_doctor();
+                std::process::exit(0);
+            }
+            Subcommands::Watch { policy, max_restarts, command } => {
+                let config = watch::WatchConfig {
+                    policy_path: policy,
+                    command,
+                    max_restarts,
+                };
+                if let Err(e) = watch::run(config) {
+                    logging::fatal("main", &format!("supervisão watch encerrada: {}", e));
+                    std::process::exit(1);
+                }
                 std::process::exit(0);
             }
         }
