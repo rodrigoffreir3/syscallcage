@@ -8,8 +8,7 @@ cd ..
 
 echo "Compiling userspace with zombie fix..."
 sudo mount -t securityfs none /sys/kernel/security 2>/dev/null || true
-cargo build --release
- --package syscallcage
+cargo build --release --package syscallcage
 
 # Start syscallcage
 sudo SYSCALLCAGE_EBPF_PATH="$(pwd)/target/bpfel-unknown-none/release/syscallcage-ebpf" ./target/release/syscallcage watch --policy configs/test-exec-policy.yaml -- sleep 10 &

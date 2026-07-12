@@ -40,11 +40,17 @@ pub fn bpf_lsm_available() -> bool {
 }
 
 pub fn detect_enforcement_mode() -> EnforcementMode {
-    if bpf_lsm_available() {
-        EnforcementMode::Sync
-    } else {
-        EnforcementMode::Reactive
+    let lsm_path = "/sys/kernel/security/lsm";
+    let content_res = std::fs::read_to_string(lsm_path);
+    crate::logging::info("monitor", &format!("LSM file check: {:?}", content_res));
+    if let Ok(content) = &content_res {
+        let is_bpf = content.split(',').any(|lsm| lsm.trim() == "bpf");
+        crate::logging::info("monitor", &format!("LSM file contains bpf: {}", is_bpf));
+        if is_bpf {
+            return EnforcementMode::Sync;
+        }
     }
+    EnforcementMode::Reactive
 }
 
 const EVENT_TYPE_READ: u32 = 1;

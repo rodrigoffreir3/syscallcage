@@ -556,14 +556,12 @@ pub fn lsm_file_open(ctx: LsmContext) -> i32 {
     }
 
     let f_mode_offset = get_f_mode_offset();
-    let mut f_mode: u32 = 0;
-    unsafe {
-        let _ = aya_ebpf::helpers::bpf_probe_read_kernel(
-            &mut f_mode as *mut u32 as *mut core::ffi::c_void,
-            4,
-            (file_ptr as *const u8).add(f_mode_offset as usize) as *const core::ffi::c_void,
-        );
-    }
+    let f_mode: u32 = unsafe {
+        match aya_ebpf::helpers::bpf_probe_read_kernel((file_ptr as *const u8).add(f_mode_offset as usize) as *const u32) {
+            Ok(v) => v,
+            Err(_) => 0,
+        }
+    };
     let is_write = (f_mode & 2) != 0; // FMODE_WRITE
 
     // 1. Verificar caminhos sensíveis proibidos por especificação (.env, .ssh/, etc.)

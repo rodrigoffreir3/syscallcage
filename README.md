@@ -136,9 +136,30 @@ Nesse modo, você nunca precisa descobrir PID nenhum — o SyscallCage já nasce
 
 ## Importante saber
 
-- **Só funciona em Linux.** A tecnologia usada (eBPF) é do kernel Linux. Rodar dentro do WSL2 (Linux dentro do Windows) também não funciona de forma confiável — já testamos.
+- **Funciona nativamente em Linux e agora em Windows via WSL2** (com as devidas configurações de kernel e BPF LSM).
 - **Pede permissão de administrador (`sudo`)** pra anexar a vigilância no nível de kernel.
 - Limitações atuais estão documentadas com honestidade na [página oficial](https://rodrigofreire.pages.dev/syscallcage) — sem promessa exagerada.
+
+## Suporte a Windows (WSL2)
+
+O Windows não possui as interfaces do kernel Linux, mas é possível rodar o SyscallCage perfeitamente dentro do **WSL2** utilizando nosso Kernel customizado ("Kernel Plus").
+Como o kernel padrão do WSL2 desabilita certas APIs (LSM), compilamos um kernel com `CONFIG_BPF_LSM=y` e `CONFIG_BPF_SYSCALL=y`.
+
+### Como rodar no Windows hoje:
+
+1. **Baixe o Kernel Customizado**: Coloque o arquivo `kernel-wsl2-bpf-plus` em um diretório do Windows (ex: `C:\Users\SeuUsuario\Desktop\kernel-wsl2-bpf-plus`).
+2. **Configure o `.wslconfig`**: Crie ou edite o arquivo `C:\Users\SeuUsuario\.wslconfig` com as seguintes linhas:
+   ```ini
+   [wsl2]
+   kernel=C:\\Users\\SeuUsuario\\Desktop\\kernel-wsl2-bpf-plus
+   kernelCommandLine=lsm=landlock,lockdown,yama,safesetid,selinux,ima,bpf
+   ```
+3. **Reinicie o WSL2**: Abra o PowerShell (como Administrador) e rode `wsl --shutdown`.
+4. **Monte o securityfs**: Toda vez que iniciar o WSL, você precisa montar o `securityfs` antes de rodar o SyscallCage, pois ele não é montado por padrão:
+   ```bash
+   sudo mount -t securityfs none /sys/kernel/security
+   ```
+5. Pronto! O SyscallCage rodará no modo BPF LSM síncrono.
 
 ## Licença
 
