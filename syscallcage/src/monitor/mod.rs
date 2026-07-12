@@ -296,13 +296,11 @@ impl Monitor {
         offsets.insert(1u32, parent_offset, 0)?;
         offsets.insert(2u32, child_offset, 0)?;
 
-        let (f_mode_off, f_path_off, bprm_file_off) = resolve_btf_offsets();
+        let f_mode_off = resolve_btf_offsets();
         offsets.insert(3u32, f_mode_off, 0)?;
-        offsets.insert(4u32, f_path_off, 0)?;
-        offsets.insert(5u32, bprm_file_off, 0)?;
         logging::info("monitor", &format!(
-            "Offsets dinâmicos estruturais resolvidos: f_mode={}, f_path={}, bprm_file={}",
-            f_mode_off, f_path_off, bprm_file_off
+            "Offsets dinâmicos estruturais resolvidos: f_mode={}",
+            f_mode_off
         ));
 
         let ip_to_domain_map = bpf.take_map("IP_TO_DOMAIN").ok_or_else(|| {
@@ -763,11 +761,9 @@ mod tests {
     }
 }
 
-fn resolve_btf_offsets() -> (u32, u32, u32) {
+fn resolve_btf_offsets() -> u32 {
     // Fallbacks padrão seguros (caso a resolução via bpftool falhe)
     let mut f_mode_offset = 4u32;
-    let mut f_path_offset = 64u32;
-    let mut bprm_file_offset = 64u32;
 
     let output = std::process::Command::new("bpftool")
         .args(&["btf", "dump", "file", "/sys/kernel/btf/vmlinux", "format", "raw"])
@@ -777,21 +773,14 @@ fn resolve_btf_offsets() -> (u32, u32, u32) {
         if out.status.success() {
             let stdout = String::from_utf8_lossy(&out.stdout);
             let mut in_file_struct = false;
-            let mut in_bprm_struct = false;
 
             for line in stdout.lines() {
                 let trimmed = line.trim();
                 if trimmed.starts_with("STRUCT 'file'") {
                     in_file_struct = true;
-                    in_bprm_struct = false;
-                    continue;
-                } else if trimmed.starts_with("STRUCT 'linux_binprm'") {
-                    in_file_struct = false;
-                    in_bprm_struct = true;
                     continue;
                 } else if trimmed.starts_with("STRUCT") || (trimmed.starts_with('[') && trimmed.contains("STRUCT")) {
                     in_file_struct = false;
-                    in_bprm_struct = false;
                     continue;
                 }
 
@@ -800,23 +789,13 @@ fn resolve_btf_offsets() -> (u32, u32, u32) {
                         if let Some(offset) = extract_bits_offset(trimmed) {
                             f_mode_offset = offset / 8;
                         }
-                    } else if trimmed.contains("'f_path'") {
-                        if let Some(offset) = extract_bits_offset(trimmed) {
-                            f_path_offset = offset / 8;
-                        }
-                    }
-                } else if in_bprm_struct {
-                    if trimmed.contains("'file'") {
-                        if let Some(offset) = extract_bits_offset(trimmed) {
-                            bprm_file_offset = offset / 8;
-                        }
                     }
                 }
             }
         }
     }
 
-    (f_mode_offset, f_path_offset, bprm_file_offset)
+    f_mode_offset
 }
 
 fn extract_bits_offset(line: &str) -> Option<u32> {

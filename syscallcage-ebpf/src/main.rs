@@ -17,25 +17,9 @@ use aya_ebpf::{
 };
 
 #[cfg(target_arch = "bpf")]
-#[repr(C)]
-pub struct path {
-    pub mnt: *mut core::ffi::c_void,
-    pub dentry: *mut core::ffi::c_void,
-}
-
+mod vmlinux;
 #[cfg(target_arch = "bpf")]
-#[repr(C)]
-pub struct file {
-    pub _padding: [u8; 64],
-    pub f_path: path,
-}
-
-#[cfg(target_arch = "bpf")]
-#[repr(C)]
-pub struct linux_binprm {
-    pub _padding: [u8; 64],
-    pub file: *mut file,
-}
+use vmlinux::{file, linux_binprm};
 
 #[cfg(target_arch = "bpf")]
 const EVENT_TYPE_READ: u32 = 1;
@@ -536,7 +520,7 @@ pub fn lsm_file_open(ctx: LsmContext) -> i32 {
 
     // Acesso de campo direto (não offset manual + soma de ponteiro): preserva
     // a proveniência de tipo BTF exigida por bpf_d_path. Ver GT-13.
-    let path_ptr = unsafe { &raw mut (*file_ptr).f_path };
+    let path_ptr = unsafe { &raw mut (*file_ptr).__bindgen_anon_1.f_path };
 
     let scratch_ptr = match SCRATCH_PATH.get_ptr_mut(0) {
         Some(ptr) => ptr,
@@ -653,7 +637,7 @@ pub fn lsm_exec_check(ctx: LsmContext) -> i32 {
     }
 
     // Mesmo padrão de lsm_file_open: acesso de campo direto preserva tipo BTF. GT-13.
-    let path_ptr = unsafe { &raw mut (*file_ptr).f_path };
+    let path_ptr = unsafe { &raw mut (*file_ptr).__bindgen_anon_1.f_path };
 
     let scratch_ptr = match SCRATCH_PATH.get_ptr_mut(0) {
         Some(ptr) => ptr,
