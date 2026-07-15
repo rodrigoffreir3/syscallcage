@@ -1,17 +1,13 @@
 #!/bin/bash
 set -e
 
-echo "Compiling eBPF object locally..."
-cd syscallcage-ebpf
-cargo +nightly build --target bpfel-unknown-none -Z build-std=core --release
-cd ..
 
 echo "Compiling userspace with zombie fix..."
 sudo mount -t securityfs none /sys/kernel/security 2>/dev/null || true
 cargo build --release --package syscallcage
 
 # Start syscallcage
-sudo SYSCALLCAGE_EBPF_PATH="$(pwd)/target/bpfel-unknown-none/release/syscallcage-ebpf" ./target/release/syscallcage watch --policy configs/test-exec-policy.yaml -- sleep 10 &
+sudo ./target/release/syscallcage watch --policy configs/test-exec-policy.yaml -- sleep 10 &
 CAGE_PID=$!
 
 sleep 2

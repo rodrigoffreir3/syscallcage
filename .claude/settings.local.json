@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo --version)",
+      "Read(//c//**)",
+      "Read(//c/Users/rodri/**)",
+      "Bash(cargo check *)"
+    ]
+  }
+}

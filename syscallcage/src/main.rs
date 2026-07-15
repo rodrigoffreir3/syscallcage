@@ -28,6 +28,9 @@ struct Args {
     #[arg(long, help = "Caminho para o arquivo de log para espelhar eventos em formato JSONL")]
     log_file: Option<String>,
 
+    #[arg(long, help = "Modo dry-run: apenas audita as violações, sem bloqueá-las")]
+    dry_run: bool,
+
     #[command(subcommand)]
     command: Option<Subcommands>,
 }
@@ -47,7 +50,7 @@ enum Subcommands {
     #[command(name = "watch", about = "Cria e supervisiona o processo do agente desde o nascimento")]
     Watch {
         #[arg(long, help = "Caminho para o arquivo YAML de política")]
-        policy: std::path::PathBuf,
+        policy: Option<std::path::PathBuf>,
 
         #[arg(long, help = "Número máximo de reinícios automáticos (padrão: ilimitado)")]
         max_restarts: Option<u32>,
@@ -57,11 +60,33 @@ enum Subcommands {
     },
 }
 
+fn resolve_policy(policy_arg: Option<String>) -> std::path::PathBuf {
+    if let Some(p) = policy_arg {
+        if !p.is_empty() {
+            return std::path::PathBuf::from(p);
+        }
+    }
+    match policy::discovery::discover_policy(&std::env::current_dir().unwrap_or_default()) {
+        Ok(Some(p)) => {
+            logging::info("main", &format!("usando política descoberta automaticamente em {}", p.display()));
+            p
+        }
+        Ok(None) => {
+            logging::fatal("main", "nenhuma política encontrada e --policy não foi fornecido");
+            std::process::exit(1);
+        }
+        Err(e) => {
+            logging::fatal("main", &format!("erro ao descobrir política: {}", e));
+            std::process::exit(1);
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() {
-    let args = Args::parse();
+    let mut args = Args::parse();
 
-    if let Some(sub) = args.command {
+    if let Some(sub) = args.command.take() {
         match sub {
             Subcommands::GeneratePolicy { from_log, output } => {
                 if let Err(e) = policy_generator::run_generator(&from_log, &output) {
@@ -75,8 +100,20 @@ async fn main() {
                 std::process::exit(0);
             }
             Subcommands::Watch { policy, max_restarts, command } => {
+                let policy_path = resolve_policy(policy.map(|p| p.display().to_string()));
+                let mut pol = match Policy::load(&policy_path) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        logging::fatal("main", &format!("falha ao carregar política: {}", e));
+                        std::process::exit(1);
+                    }
+                };
+                if args.dry_run {
+                    pol.force_dry_run();
+                    logging::info("main", "modo dry-run ativado: violações serão apenas auditadas");
+                }
                 let config = watch::WatchConfig {
-                    policy_path: policy,
+                    policy: pol,
                     command,
                     max_restarts,
                 };
@@ -98,13 +135,7 @@ async fn main() {
         }
     };
 
-    let policy_path = match args.policy {
-        Some(ref p) if !p.is_empty() => p,
-        _ => {
-            logging::fatal("main", "flag --policy é obrigatória quando executando em modo monitor");
-            std::process::exit(1);
-        }
-    };
+    let policy_path = resolve_policy(args.policy);
 
     // Configura espelhamento de arquivo de log se solicitado
     if let Some(ref log_path_str) = args.log_file {
@@ -114,13 +145,17 @@ async fn main() {
         }
     }
 
-    let pol = match Policy::load(std::path::Path::new(policy_path)) {
+    let mut pol = match Policy::load(&policy_path) {
         Ok(p) => p,
         Err(e) => {
             logging::fatal("main", &format!("falha ao carregar política: {}", e));
             std::process::exit(1);
         }
     };
+    if args.dry_run {
+        pol.force_dry_run();
+        logging::info("main", "modo dry-run ativado: violações serão apenas auditadas");
+    }
 
     let enf = Arc::new(Enforcer::new(pol.clone()));
 
@@ -268,10 +303,19 @@ fn run_doctor() {
         println!("  Isso ainda funciona, mas o bloqueio acontece após a violação, não antes.");
     }
 
-    // 4. eBPF companion binário encontrado
-    match crate::monitor::locate_ebpf_binary() {
-        Ok(path) => println!("✓ Programa eBPF encontrado em: {}", path.display()),
-        Err(_) => println!("✗ Programa eBPF não encontrado. Reinstale ou defina SYSCALLCAGE_EBPF_PATH."),
+    // 4. eBPF embutido e verifier
+    match crate::monitor::doctor_check_ebpf() {
+        Ok((size, hash, verifier_res)) => {
+            println!("✓ Objeto eBPF embutido: {} bytes, sha256 {}", size, hash);
+            match verifier_res {
+                Ok(_) => println!("✓ Verifier do kernel aceitou o carregamento de teste dos programas LSM"),
+                Err(e) => {
+                    println!("✗ Verifier do kernel rejeitou os programas LSM: {:?}", e);
+                    std::process::exit(1);
+                }
+            }
+        },
+        Err(e) => println!("✗ Erro ao verificar objeto eBPF embutido: {}", e),
     }
 
     // 5. Privilégio

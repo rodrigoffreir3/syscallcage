@@ -15,6 +15,17 @@ use aya::maps::RingBuf;
 use aya::programs::{KProbe, TracePoint, Lsm};
 use thiserror::Error;
 
+/// Objeto eBPF embutido em tempo de compilação.
+///
+/// Isto substitui a antiga localização em runtime (`locate_ebpf_binary`),
+/// removida no GT-15. O embed só é seguro porque o GT-14 migrou o acesso
+/// a campos de struct do kernel para CO-RE real (`aya-tool generate`):
+/// as relocations são resolvidas em load-time contra o BTF do kernel de
+/// destino, então um único objeto pré-compilado é portável entre kernels.
+/// Se algum dia o CO-RE for quebrado, este embed passa a propagar o bug
+/// para todos os usuários -- ver GT-14 antes de mexer aqui.
+const EBPF_OBJECT: &[u8] = include_bytes!("../../prebuilt/syscallcage-ebpf.o");
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct BpfSyscallRule {
@@ -234,24 +245,7 @@ impl Monitor {
             }
         }
 
-        // Find the eBPF object at runtime.
-        let ebpf_obj_path = locate_ebpf_binary().map_err(|e| {
-            MonitorError::IO(std::io::Error::new(
-                e.kind(),
-                format!(
-                    "{}. Defina SYSCALLCAGE_EBPF_PATH ou compile com: cargo +nightly build --bin syscallcage-ebpf --target bpfel-unknown-none -Z build-std=core --release",
-                    e
-                )
-            ))
-        })?;
-
-        let bpf_bytes = std::fs::read(&ebpf_obj_path).map_err(|e| {
-            MonitorError::IO(std::io::Error::new(
-                e.kind(),
-                format!("falha ao ler {:?}: {}", ebpf_obj_path, e),
-            ))
-        })?;
-        let mut bpf = aya::Ebpf::load(&bpf_bytes)?;
+        let mut bpf = aya::Ebpf::load(EBPF_OBJECT)?;
 
         // Register target PID in MONITORED_PIDS map
         let monitored_pids_map = bpf.map_mut("MONITORED_PIDS").ok_or_else(|| {
@@ -809,40 +803,14 @@ fn extract_bits_offset(line: &str) -> Option<u32> {
     }
 }
 
-pub fn locate_ebpf_binary() -> Result<std::path::PathBuf, std::io::Error> {
-    if let Ok(env_path) = std::env::var("SYSCALLCAGE_EBPF_PATH").or_else(|_| std::env::var("AGENT_CAGE_EBPF_PATH")) {
-        let p = std::path::PathBuf::from(env_path);
-        if p.exists() {
-            return Ok(p);
-        }
-    }
+pub fn doctor_check_ebpf() -> Result<(usize, String, Result<(), aya::EbpfError>), std::io::Error> {
+    use sha2::{Sha256, Digest};
+    let mut hasher = Sha256::new();
+    hasher.update(EBPF_OBJECT);
+    let hash: String = hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect();
+    let short_hash = hash[..8].to_string();
 
-    let exe = std::env::current_exe().unwrap_or_default();
-    let exe_dir = exe.parent().unwrap_or(std::path::Path::new("."));
+    let verifier_result = aya::Ebpf::load(EBPF_OBJECT).map(|_| ());
 
-    // Candidate 1: sibling of binary (production / installed)
-    let sibling = exe_dir.join("syscallcage-ebpf");
-    // Candidate 2: binary in project root, eBPF in target/bpfel-unknown-none/release/
-    let root_release = exe_dir.join("target/bpfel-unknown-none/release/syscallcage-ebpf");
-    // Candidate 3: binary at target/release/syscallcage, eBPF at target/bpfel-unknown-none/release/
-    let cargo_release = exe_dir
-        .parent().unwrap_or(exe_dir)
-        .join("bpfel-unknown-none/release/syscallcage-ebpf");
-    // Candidate 4: same but debug (fallback)
-    let root_debug = exe_dir.join("target/bpfel-unknown-none/debug/syscallcage-ebpf");
-    let cargo_debug = exe_dir
-        .parent().unwrap_or(exe_dir)
-        .join("bpfel-unknown-none/debug/syscallcage-ebpf");
-
-    let candidates = [sibling, root_release, cargo_release, root_debug, cargo_debug];
-    for p in candidates {
-        if p.exists() {
-            return Ok(p);
-        }
-    }
-
-    Err(std::io::Error::new(
-        std::io::ErrorKind::NotFound,
-        "syscallcage-ebpf object não encontrado"
-    ))
+    Ok((EBPF_OBJECT.len(), short_hash, verifier_result))
 }

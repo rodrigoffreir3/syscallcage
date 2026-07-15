@@ -1,7 +1,18 @@
 [package]
 name = "syscallcage"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
+license = "MPL-2.0"
+description = "Kernel-level guardrails for autonomous AI agents. Restricts what a process can do via eBPF, with synchronous (BPF LSM) enforcement when the kernel supports it."
+repository = "https://github.com/rodrigoffreir3/syscallcage"
+homepage = "https://rodrigofreire.pages.dev/syscallcage"
+readme = "../README.md"
+keywords = ["ebpf", "security", "sandbox", "ai-agents", "lsm"]
+categories = ["command-line-utilities", "os::linux-apis"]
+exclude = [
+    "../scratch/*",
+    "../*.tar.gz",
+]
 
 [[bin]]
 name = "syscallcage"
@@ -19,3 +30,4 @@ thiserror = "1.0"
 nix = { version = "0.27", features = ["signal", "process"] }
 tokio = { version = "1.35", features = ["full"] }
 libc = "0.2"
+sha2 = "0.11.0"

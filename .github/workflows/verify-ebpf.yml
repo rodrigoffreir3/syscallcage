@@ -1,0 +1,20 @@
+name: Verify eBPF reproducibility
+on: [push, pull_request]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instala toolchain e bpf-linker
+        run: |
+          rustup toolchain install nightly --component rust-src
+          cargo install bpf-linker
+      - name: Recompila o eBPF a partir do fonte
+        run: ./scripts/build-ebpf.sh
+      - name: Falha se o objeto versionado divergir do recompilado
+        run: |
+          if ! git diff --exit-code --stat syscallcage/prebuilt/syscallcage-ebpf.o; then
+            echo "ERRO: o objeto eBPF versionado NAO corresponde ao fonte atual." >&2
+            echo "Rode ./scripts/build-ebpf.sh e commite o resultado." >&2
+            exit 1
+          fi

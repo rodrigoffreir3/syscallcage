@@ -1,0 +1,7 @@
+mode: enforce
+filesystem:
+  allow_read:
+    - "**"
+network:
+  allow_domains:
+    - "github.com"

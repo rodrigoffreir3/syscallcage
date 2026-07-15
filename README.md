@@ -40,6 +40,8 @@ A abordagem mais comum pra esse problema hoje é colocar o agente inteiro dentro
 
 O SyscallCage não isola nada. Ele deixa o agente trabalhar exatamente onde já estava — e observa, no nível mais fundo do sistema, se algo passa da linha. É a diferença entre trancar alguém numa sala vazia e ter um segurança de confiança de olho na sala de sempre. Você não perde velocidade nem muda seu fluxo de trabalho pra ganhar segurança.
 
+> ⚖️ **Quer entender como isso se compara com Docker (Seccomp), AppArmor, Landlock e Falco?** Leia o nosso guia detalhado de [Alternativas e Trade-offs](docs/alternatives.md).
+
 ## Como instalar
 
 Instalação em um comando só (baixa o binário já compilado da release, checksum verificado — nenhuma compilação acontece na sua máquina):

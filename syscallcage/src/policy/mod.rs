@@ -7,7 +7,7 @@ use serde::Deserialize;
 use thiserror::Error;
 
 pub mod matcher;
-
+pub mod discovery;
 #[derive(Debug, Error)]
 pub enum PolicyError {
     #[error("falha ao ler arquivo de política: {0}")]
@@ -162,6 +162,10 @@ impl Policy {
 
     pub fn mode(&self) -> Mode {
         self.mode
+    }
+
+    pub fn force_dry_run(&mut self) {
+        self.mode = Mode::Monitor;
     }
 
     pub fn syscall_denied(&self, syscall: &str) -> bool {

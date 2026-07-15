@@ -16,15 +16,13 @@ use crate::monitor::Monitor;
 use crate::policy::Policy;
 
 pub struct WatchConfig {
-    pub policy_path: PathBuf,
+    pub policy: Policy,
     pub command: Vec<String>,
     pub max_restarts: Option<u32>,
 }
 
 #[derive(Debug, Error)]
 pub enum WatchError {
-    #[error("falha ao carregar política: {0}")]
-    Policy(#[from] crate::policy::PolicyError),
     #[error("erro de sistema (fork/exec/wait): {0}")]
     Errno(#[from] nix::Error),
     #[error("erro de monitor: {0}")]
@@ -49,9 +47,7 @@ pub fn set_parent_death_signal() -> Result<(), std::io::Error> {
 }
 
 pub fn run(config: WatchConfig) -> Result<(), WatchError> {
-    // Falha aqui aborta tudo -- não faz sentido criar processo filho pra
-    // descobrir depois que a política é inválida.
-    let policy = Policy::load(&config.policy_path)?;
+    let policy = config.policy;
     let mut restart_count = 0u32;
 
     loop {

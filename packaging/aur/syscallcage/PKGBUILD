@@ -1,0 +1,22 @@
+pkgname=syscallcage
+pkgver=0.3.0
+pkgrel=1
+pkgdesc="Kernel-level guardrails for autonomous AI agents via eBPF LSM"
+arch=('x86_64')
+url="https://rodrigofreire.pages.dev/syscallcage"
+license=('MPL')
+depends=('glibc')
+makedepends=('cargo')
+source=("${pkgname}-${pkgver}.tar.gz::https://github.com/rodrigoffreir3/syscallcage/archive/refs/tags/v${pkgver}.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cd "${srcdir}/${pkgname}-${pkgver}"
+  export CARGO_TARGET_DIR=target
+  cargo build --release --locked --workspace
+}
+
+package() {
+  cd "${srcdir}/${pkgname}-${pkgver}"
+  install -Dm 755 target/release/syscallcage -t "${pkgdir}/usr/bin"
+}
