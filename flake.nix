@@ -19,7 +19,7 @@
       packages = forAllSystems (system:
         let
           pkgs = pkgsFor system;
-          rustToolchain = pkgs.rust-bin.nightly.latest.default.override {
+          rustToolchain = pkgs.rust-bin.nightly."2026-07-11".default.override {
             targets = [ "bpfel-unknown-none" ];
             extensions = [ "rust-src" ];
           };
@@ -57,7 +57,7 @@
       devShells = forAllSystems (system:
         let
           pkgs = pkgsFor system;
-          rustToolchain = pkgs.rust-bin.nightly.latest.default.override {
+          rustToolchain = pkgs.rust-bin.nightly."2026-07-11".default.override {
             targets = [ "bpfel-unknown-none" ];
             extensions = [ "rust-src" ];
           };

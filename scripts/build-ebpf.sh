@@ -15,9 +15,9 @@ if ! command -v bpf-linker &> /dev/null; then
     exit 1
 fi
 
-if ! rustup toolchain list | grep -q "nightly"; then
-    echo "ERRO: toolchain nightly não encontrada. Instale com 'rustup toolchain install nightly --component rust-src'" >&2
-    exit 1
+if ! rustup toolchain list | grep -q "nightly-2026-07-11"; then
+    echo "Instalando toolchain nightly-2026-07-11 para reprodutibilidade..."
+    rustup toolchain install nightly-2026-07-11 --component rust-src
 fi
 
 PROJECT_ROOT=$(git rev-parse --show-toplevel)
@@ -28,7 +28,7 @@ mkdir -p syscallcage/prebuilt
 
 echo "Compilando syscallcage-ebpf..."
 cd syscallcage-ebpf
-cargo +nightly build --bin syscallcage-ebpf --target bpfel-unknown-none -Z build-std=core --release
+cargo +nightly-2026-07-11 build --bin syscallcage-ebpf --target bpfel-unknown-none -Z build-std=core --release
 
 echo "Copiando objeto gerado..."
 cp "../target/bpfel-unknown-none/release/syscallcage-ebpf" "$PROJECT_ROOT/syscallcage/prebuilt/syscallcage-ebpf.o"

@@ -7,7 +7,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Instala toolchain e bpf-linker
         run: |
-          rustup toolchain install nightly --component rust-src
+          rustup toolchain install nightly-2026-07-11 --component rust-src
           cargo install bpf-linker
       - name: Recompila o eBPF a partir do fonte
         run: ./scripts/build-ebpf.sh
