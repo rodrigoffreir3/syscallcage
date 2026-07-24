@@ -47,6 +47,9 @@ pub fn set_parent_death_signal() -> Result<(), std::io::Error> {
 }
 
 pub fn parse_c_command(args: &[String]) -> Result<Vec<CString>, (usize, String)> {
+    if args.is_empty() {
+        return Err((0, "comando não pode ser vazio".to_string()));
+    }
     let mut c_args = Vec::with_capacity(args.len());
     for (idx, arg) in args.iter().enumerate() {
         match CString::new(arg.as_str()) {
@@ -213,5 +216,14 @@ mod tests {
         assert!(res.is_err());
         let (idx, _err) = res.unwrap_err();
         assert_eq!(idx, 1);
+    }
+
+    #[test]
+    fn test_parse_c_command_empty_returns_err() {
+        let args: Vec<String> = vec![];
+        let res = parse_c_command(&args);
+        assert!(res.is_err());
+        let (idx, _err) = res.unwrap_err();
+        assert_eq!(idx, 0);
     }
 }

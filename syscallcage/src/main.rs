@@ -303,9 +303,8 @@ pub enum CheckStatus {
 
 #[derive(Debug)]
 pub struct DoctorCheck {
-    pub name: String,
     pub status: CheckStatus,
-    pub message: String,
+    pub line: String,
     pub detail: Option<String>,
 }
 
@@ -323,9 +322,8 @@ pub fn collect_doctor_report() -> DoctorReport {
 
     // 1. Versão do binário
     checks.push(DoctorCheck {
-        name: "Binário instalado".to_string(),
         status: CheckStatus::Ok,
-        message: format!("v{}", env!("CARGO_PKG_VERSION")),
+        line: format!("Binário instalado: v{}", env!("CARGO_PKG_VERSION")),
         detail: None,
     });
 
@@ -334,25 +332,22 @@ pub fn collect_doctor_report() -> DoctorReport {
         .map(|s| s.trim().to_string())
         .unwrap_or_else(|_| "desconhecido".into());
     checks.push(DoctorCheck {
-        name: "Kernel detectado".to_string(),
         status: CheckStatus::Ok,
-        message: kernel,
+        line: format!("Kernel detectado: {}", kernel),
         detail: None,
     });
 
     // 3. Suporte a BPF LSM
     if crate::monitor::bpf_lsm_available() {
         checks.push(DoctorCheck {
-            name: "BPF LSM".to_string(),
             status: CheckStatus::Ok,
-            message: "disponível — modo síncrono (recomendado) será usado.".to_string(),
+            line: "BPF LSM disponível — modo síncrono (recomendado) será usado.".to_string(),
             detail: None,
         });
     } else {
         checks.push(DoctorCheck {
-            name: "BPF LSM".to_string(),
             status: CheckStatus::Warn,
-            message: "indisponível — modo reativo (fallback) será usado.".to_string(),
+            line: "BPF LSM indisponível — modo reativo (fallback) será usado.".to_string(),
             detail: Some("Isso ainda funciona, mas o bloqueio acontece após a violação, não antes.".to_string()),
         });
     }
@@ -361,34 +356,30 @@ pub fn collect_doctor_report() -> DoctorReport {
     match crate::monitor::doctor_check_ebpf() {
         Ok((size, hash, verifier_res)) => {
             checks.push(DoctorCheck {
-                name: "Objeto eBPF embutido".to_string(),
                 status: CheckStatus::Ok,
-                message: format!("{} bytes, sha256 {}", size, hash),
+                line: format!("Objeto eBPF embutido: {} bytes, sha256 {}", size, hash),
                 detail: None,
             });
 
             match verifier_res {
                 Ok(_) => {
                     checks.push(DoctorCheck {
-                        name: "Verifier do kernel".to_string(),
                         status: CheckStatus::Ok,
-                        message: "aceitou o carregamento de teste dos programas LSM".to_string(),
+                        line: "Verifier do kernel aceitou o carregamento de teste dos programas LSM".to_string(),
                         detail: None,
                     });
                 }
                 Err(e) => {
                     if !is_root {
                         checks.push(DoctorCheck {
-                            name: "Verifier do kernel".to_string(),
                             status: CheckStatus::Warn,
-                            message: "não foi possível testar o verifier sem privilégios de root (EPERM).".to_string(),
+                            line: "Não foi possível testar o verifier do eBPF sem privilégios de root (EPERM).".to_string(),
                             detail: None,
                         });
                     } else {
                         checks.push(DoctorCheck {
-                            name: "Verifier do kernel".to_string(),
                             status: CheckStatus::Error,
-                            message: format!("rejeitou os programas LSM: {:?}", e),
+                            line: format!("Verifier do kernel rejeitou os programas LSM: {:?}", e),
                             detail: None,
                         });
                         has_fatal_error = true;
@@ -398,9 +389,8 @@ pub fn collect_doctor_report() -> DoctorReport {
         }
         Err(e) => {
             checks.push(DoctorCheck {
-                name: "Objeto eBPF embutido".to_string(),
                 status: CheckStatus::Error,
-                message: format!("erro ao verificar objeto eBPF: {}", e),
+                line: format!("Erro ao verificar objeto eBPF embutido: {}", e),
                 detail: None,
             });
             has_fatal_error = true;
@@ -410,16 +400,14 @@ pub fn collect_doctor_report() -> DoctorReport {
     // 5. Privilégio
     if is_root {
         checks.push(DoctorCheck {
-            name: "Privilégios".to_string(),
             status: CheckStatus::Ok,
-            message: "Rodando como root — pronto para anexar eBPF.".to_string(),
+            line: "Rodando como root — pronto para anexar eBPF.".to_string(),
             detail: None,
         });
     } else {
         checks.push(DoctorCheck {
-            name: "Privilégios".to_string(),
             status: CheckStatus::Warn,
-            message: "Não está rodando como root. Use 'sudo' ao executar o SyscallCage de verdade.".to_string(),
+            line: "Não está rodando como root. Use 'sudo' ao executar o SyscallCage de verdade.".to_string(),
             detail: None,
         });
     }
@@ -441,7 +429,7 @@ fn run_doctor() {
             CheckStatus::Warn => "!",
             CheckStatus::Error => "✗",
         };
-        println!("{} {}: {}", prefix, check.name, check.message);
+        println!("{} {}", prefix, check.line);
         if let Some(detail) = &check.detail {
             println!("  {}", detail);
         }
@@ -465,7 +453,7 @@ mod tests {
 
         if !report.is_root {
             assert!(!report.has_fatal_error, "doctor não deve gerar erro fatal sem privilégio");
-            let priv_check = report.checks.iter().find(|c| c.name == "Privilégios");
+            let priv_check = report.checks.iter().find(|c| c.line.contains("Não está rodando como root"));
             assert!(priv_check.is_some());
             assert_eq!(priv_check.unwrap().status, CheckStatus::Warn);
         }
