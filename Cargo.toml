@@ -9,3 +9,4 @@ resolver = "2"
 opt-level = 3
 panic = "abort"
 codegen-units = 1
+strip = true

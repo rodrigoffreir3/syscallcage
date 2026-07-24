@@ -28,6 +28,11 @@ mkdir -p syscallcage/prebuilt
 
 echo "Compilando syscallcage-ebpf..."
 cd syscallcage-ebpf
+# Reprodutibilidade: neutraliza o path absoluto do workspace, que varia entre
+# CI (/home/runner/work/...) e máquina local (~/... ou C:/Users/...) e mudava
+# a assinatura do .o final mesmo sem alteração real no código-fonte.
+export CARGO_ENCODED_RUSTFLAGS="--remap-path-prefix=${PROJECT_ROOT}=/workspace"
+
 cargo +nightly-2026-07-11 build --bin syscallcage-ebpf --target bpfel-unknown-none -Z build-std=core --release
 
 echo "Copiando objeto gerado..."
