@@ -202,10 +202,20 @@ async fn main() {
     });
 
     // infalível: falha apenas se o runtime tokio não estiver ativo, o que é impossível aqui
-    let mut sigint = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt())
-        .expect("falha ao registrar SIGINT");
-    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-        .expect("falha ao registrar SIGTERM");
+    let mut sigint = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::interrupt()) {
+        Ok(s) => s,
+        Err(e) => {
+            logging::fatal("main", &format!("falha ao registrar SIGINT: {}", e));
+            std::process::exit(1);
+        }
+    };
+    let mut sigterm = match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+        Ok(s) => s,
+        Err(e) => {
+            logging::fatal("main", &format!("falha ao registrar SIGTERM: {}", e));
+            std::process::exit(1);
+        }
+    };
 
     let mut monitor_handle = std::pin::pin!(monitor_handle);
 
@@ -284,46 +294,180 @@ async fn main() {
     });
 }
 
-fn run_doctor() {
-    println!("SyscallCage — diagnóstico do ambiente\n");
+#[derive(Debug, PartialEq, Eq)]
+pub enum CheckStatus {
+    Ok,
+    Warn,
+    Error,
+}
+
+#[derive(Debug)]
+pub struct DoctorCheck {
+    pub name: String,
+    pub status: CheckStatus,
+    pub message: String,
+    pub detail: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct DoctorReport {
+    pub checks: Vec<DoctorCheck>,
+    pub is_root: bool,
+    pub has_fatal_error: bool,
+}
+
+pub fn collect_doctor_report() -> DoctorReport {
+    let is_root = unsafe { libc::geteuid() } == 0;
+    let mut checks = Vec::new();
+    let mut has_fatal_error = false;
 
     // 1. Versão do binário
-    println!("✓ Binário instalado: v{}", env!("CARGO_PKG_VERSION"));
+    checks.push(DoctorCheck {
+        name: "Binário instalado".to_string(),
+        status: CheckStatus::Ok,
+        message: format!("v{}", env!("CARGO_PKG_VERSION")),
+        detail: None,
+    });
 
     // 2. Kernel
     let kernel = std::fs::read_to_string("/proc/sys/kernel/osrelease")
+        .map(|s| s.trim().to_string())
         .unwrap_or_else(|_| "desconhecido".into());
-    println!("✓ Kernel detectado: {}", kernel.trim());
+    checks.push(DoctorCheck {
+        name: "Kernel detectado".to_string(),
+        status: CheckStatus::Ok,
+        message: kernel,
+        detail: None,
+    });
 
     // 3. Suporte a BPF LSM
     if crate::monitor::bpf_lsm_available() {
-        println!("✓ BPF LSM disponível — modo síncrono (recomendado) será usado.");
+        checks.push(DoctorCheck {
+            name: "BPF LSM".to_string(),
+            status: CheckStatus::Ok,
+            message: "disponível — modo síncrono (recomendado) será usado.".to_string(),
+            detail: None,
+        });
     } else {
-        println!("! BPF LSM indisponível — modo reativo (fallback) será usado.");
-        println!("  Isso ainda funciona, mas o bloqueio acontece após a violação, não antes.");
+        checks.push(DoctorCheck {
+            name: "BPF LSM".to_string(),
+            status: CheckStatus::Warn,
+            message: "indisponível — modo reativo (fallback) será usado.".to_string(),
+            detail: Some("Isso ainda funciona, mas o bloqueio acontece após a violação, não antes.".to_string()),
+        });
     }
 
     // 4. eBPF embutido e verifier
     match crate::monitor::doctor_check_ebpf() {
         Ok((size, hash, verifier_res)) => {
-            println!("✓ Objeto eBPF embutido: {} bytes, sha256 {}", size, hash);
+            checks.push(DoctorCheck {
+                name: "Objeto eBPF embutido".to_string(),
+                status: CheckStatus::Ok,
+                message: format!("{} bytes, sha256 {}", size, hash),
+                detail: None,
+            });
+
             match verifier_res {
-                Ok(_) => println!("✓ Verifier do kernel aceitou o carregamento de teste dos programas LSM"),
+                Ok(_) => {
+                    checks.push(DoctorCheck {
+                        name: "Verifier do kernel".to_string(),
+                        status: CheckStatus::Ok,
+                        message: "aceitou o carregamento de teste dos programas LSM".to_string(),
+                        detail: None,
+                    });
+                }
                 Err(e) => {
-                    println!("✗ Verifier do kernel rejeitou os programas LSM: {:?}", e);
-                    std::process::exit(1);
+                    if !is_root {
+                        checks.push(DoctorCheck {
+                            name: "Verifier do kernel".to_string(),
+                            status: CheckStatus::Warn,
+                            message: "não foi possível testar o verifier sem privilégios de root (EPERM).".to_string(),
+                            detail: None,
+                        });
+                    } else {
+                        checks.push(DoctorCheck {
+                            name: "Verifier do kernel".to_string(),
+                            status: CheckStatus::Error,
+                            message: format!("rejeitou os programas LSM: {:?}", e),
+                            detail: None,
+                        });
+                        has_fatal_error = true;
+                    }
                 }
             }
-        },
-        Err(e) => println!("✗ Erro ao verificar objeto eBPF embutido: {}", e),
+        }
+        Err(e) => {
+            checks.push(DoctorCheck {
+                name: "Objeto eBPF embutido".to_string(),
+                status: CheckStatus::Error,
+                message: format!("erro ao verificar objeto eBPF: {}", e),
+                detail: None,
+            });
+            has_fatal_error = true;
+        }
     }
 
     // 5. Privilégio
-    if unsafe { libc::geteuid() } == 0 {
-        println!("✓ Rodando como root — pronto para anexar eBPF.");
+    if is_root {
+        checks.push(DoctorCheck {
+            name: "Privilégios".to_string(),
+            status: CheckStatus::Ok,
+            message: "Rodando como root — pronto para anexar eBPF.".to_string(),
+            detail: None,
+        });
     } else {
-        println!("! Não está rodando como root. Use 'sudo' ao executar o SyscallCage de verdade.");
+        checks.push(DoctorCheck {
+            name: "Privilégios".to_string(),
+            status: CheckStatus::Warn,
+            message: "Não está rodando como root. Use 'sudo' ao executar o SyscallCage de verdade.".to_string(),
+            detail: None,
+        });
+    }
+
+    DoctorReport {
+        checks,
+        is_root,
+        has_fatal_error,
+    }
+}
+
+fn run_doctor() {
+    println!("SyscallCage — diagnóstico do ambiente\n");
+    let report = collect_doctor_report();
+
+    for check in &report.checks {
+        let prefix = match check.status {
+            CheckStatus::Ok => "✓",
+            CheckStatus::Warn => "!",
+            CheckStatus::Error => "✗",
+        };
+        println!("{} {}: {}", prefix, check.name, check.message);
+        if let Some(detail) = &check.detail {
+            println!("  {}", detail);
+        }
+    }
+
+    if report.has_fatal_error {
+        std::process::exit(1);
     }
 
     println!("\nSe todos os itens acima estão ✓, você está pronto para usar.");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_collect_doctor_report_does_not_panic() {
+        let report = collect_doctor_report();
+        assert!(!report.checks.is_empty());
+
+        if !report.is_root {
+            assert!(!report.has_fatal_error, "doctor não deve gerar erro fatal sem privilégio");
+            let priv_check = report.checks.iter().find(|c| c.name == "Privilégios");
+            assert!(priv_check.is_some());
+            assert_eq!(priv_check.unwrap().status, CheckStatus::Warn);
+        }
+    }
 }

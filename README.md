@@ -104,6 +104,20 @@ sudo ./target/release/syscallcage --pid <PID> --policy configs/exemplo-monitor-m
 
 Ele nunca sugere liberar arquivo de credencial ou comando perigoso, mesmo que apareça na sessão observada — isso fica de fora, sempre.
 
+### O que você vê quando algo é bloqueado
+
+Quando o SyscallCage barra uma ação proibida (como uma tentativa de leitura a um arquivo `.env` ou chave privada), ele emite um log estruturado em formato JSON identificando a ação interceptada:
+
+```json
+{"timestamp":"2026-07-24T17:00:00Z","level":"fatal","component":"enforcer","message":"violação de política crítica: encerrando processo","pid":1234,"event_type":"open","target":"/home/user/project/.env","action":"kill"}
+```
+
+No modo `watch`, o supervisor intercepta a morte do processo e registra a interrupção da supervisão no log:
+
+```json
+{"timestamp":"2026-07-24T17:00:00Z","level":"fatal","component":"watch","message":"agente encerrado por violação de política -- supervisão interrompida, requer intervenção humana"}
+```
+
 ## Entendendo o comando, pedaço por pedaço
 
 Se você nunca usou terminal antes, um comando como esse pode parecer papagaio grego:

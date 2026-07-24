@@ -46,6 +46,17 @@ pub fn set_parent_death_signal() -> Result<(), std::io::Error> {
     Ok(())
 }
 
+pub fn parse_c_command(args: &[String]) -> Result<Vec<CString>, (usize, String)> {
+    let mut c_args = Vec::with_capacity(args.len());
+    for (idx, arg) in args.iter().enumerate() {
+        match CString::new(arg.as_str()) {
+            Ok(c_str) => c_args.push(c_str),
+            Err(e) => return Err((idx, format!("argumento {}: {}", idx, e))),
+        }
+    }
+    Ok(c_args)
+}
+
 pub fn run(config: WatchConfig) -> Result<(), WatchError> {
     let policy = config.policy;
     let mut restart_count = 0u32;
@@ -64,15 +75,21 @@ pub fn run(config: WatchConfig) -> Result<(), WatchError> {
                     logging::fatal("watch", &format!("falha ao configurar PR_SET_PDEATHSIG: {}", e));
                     std::process::exit(127);
                 }
-                let c_command: Vec<CString> = config
-                    .command
-                    .iter()
-                    .map(|s| CString::new(s.as_str()).expect("comando não pode conter byte nulo"))
-                    .collect();
-                // Se execvp retornar, é falha (comando não encontrado/sem
-                // permissão) -- o filho morre imediatamente, sem herdar
-                // estado do SyscallCage.
-                let _ = execvp(&c_command[0], &c_command);
+                let c_command = match parse_c_command(&config.command) {
+                    Ok(cmd) => cmd,
+                    Err((idx, err)) => {
+                        logging::fatal(
+                            "watch",
+                            &format!("o comando contém um caractere nulo inválido na posição {}: {}", idx, err),
+                        );
+                        std::process::exit(2);
+                    }
+                };
+                let Err(e) = execvp(&c_command[0], &c_command);
+                logging::fatal(
+                    "watch",
+                    &format!("falha ao executar '{}': {}", config.command.get(0).cloned().unwrap_or_default(), e),
+                );
                 std::process::exit(127);
             }
             ForkResult::Parent { child } => {
@@ -178,5 +195,23 @@ mod tests {
         // prctl em si tem sucesso (retorno 0), o que já valida a integração
         // correta com libc.
         assert!(set_parent_death_signal().is_ok());
+    }
+
+    #[test]
+    fn test_parse_c_command_valid() {
+        let args = vec!["ls".to_string(), "-l".to_string()];
+        let res = parse_c_command(&args);
+        assert!(res.is_ok());
+        let c_args = res.unwrap();
+        assert_eq!(c_args.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_c_command_null_byte_returns_err() {
+        let args = vec!["echo".to_string(), "hello\0world".to_string()];
+        let res = parse_c_command(&args);
+        assert!(res.is_err());
+        let (idx, _err) = res.unwrap_err();
+        assert_eq!(idx, 1);
     }
 }
