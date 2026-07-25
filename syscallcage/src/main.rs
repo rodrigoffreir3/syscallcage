@@ -315,6 +315,30 @@ pub struct DoctorReport {
     pub has_fatal_error: bool,
 }
 
+/// Decide o resultado da checagem de privilégio a partir do estado informado.
+///
+/// Isolada de `collect_doctor_report_with` porque aquela função executa uma
+/// tentativa real de carregar o objeto eBPF no kernel, cujo resultado depende
+/// do privilégio *real* do processo. Testar o caminho root através do relatório
+/// completo produziria um estado incoerente (afirmar root enquanto o kernel
+/// nega permissão). Aqui a decisão é pura e determinística em qualquer ambiente.
+pub fn privilege_check(is_root: bool) -> DoctorCheck {
+    if is_root {
+        DoctorCheck {
+            status: CheckStatus::Ok,
+            line: "Rodando como root — pronto para anexar eBPF.".to_string(),
+            detail: None,
+        }
+    } else {
+        DoctorCheck {
+            status: CheckStatus::Warn,
+            line: "Não está rodando como root. Use 'sudo' ao executar o SyscallCage de verdade."
+                .to_string(),
+            detail: None,
+        }
+    }
+}
+
 pub fn collect_doctor_report() -> DoctorReport {
     let is_root = unsafe { libc::geteuid() } == 0;
     collect_doctor_report_with(is_root)
@@ -408,19 +432,7 @@ pub fn collect_doctor_report_with(is_root: bool) -> DoctorReport {
     }
 
     // 5. Privilégio
-    if is_root {
-        checks.push(DoctorCheck {
-            status: CheckStatus::Ok,
-            line: "Rodando como root — pronto para anexar eBPF.".to_string(),
-            detail: None,
-        });
-    } else {
-        checks.push(DoctorCheck {
-            status: CheckStatus::Warn,
-            line: "Não está rodando como root. Use 'sudo' ao executar o SyscallCage de verdade.".to_string(),
-            detail: None,
-        });
-    }
+    checks.push(privilege_check(is_root));
 
     DoctorReport {
         checks,
@@ -485,16 +497,16 @@ mod tests {
     }
 
     #[test]
-    fn test_doctor_reports_root_privilege() {
-        let report = collect_doctor_report_with(true);
+    fn test_privilege_check_root() {
+        let check = privilege_check(true);
+        assert_eq!(check.status, CheckStatus::Ok);
+        assert!(check.line.contains("Rodando como root"));
+    }
 
-        assert!(report.is_root);
-        let priv_check = report
-            .checks
-            .iter()
-            .find(|c| c.line.contains("Rodando como root"))
-            .expect("faltou a checagem de privilégio no relatório");
-
-        assert_eq!(priv_check.status, CheckStatus::Ok);
+    #[test]
+    fn test_privilege_check_non_root() {
+        let check = privilege_check(false);
+        assert_eq!(check.status, CheckStatus::Warn);
+        assert!(check.line.contains("Não está rodando como root"));
     }
 }
