@@ -9,4 +9,12 @@ resolver = "2"
 opt-level = 3
 panic = "abort"
 codegen-units = 1
-strip = true
+# "debuginfo" remove apenas informação de debug (DWARF), preservando a
+# tabela de símbolos que o parser ELF do Aya exige para diferenciar seções
+# do objeto BPF. strip=true/"symbols" é agressivo demais: colapsa símbolos
+# distintos no mesmo endereço aparente e quebra Monitor::new na inicialização
+# (ver SCC-19). A reprodutibilidade do hash do .o não depende da tabela de
+# símbolos — depende de neutralizar path absoluto, o que já é feito via
+# --remap-path-prefix em build-ebpf.sh. Não trocar para true sem reabrir
+# esta investigação.
+strip = "debuginfo"
