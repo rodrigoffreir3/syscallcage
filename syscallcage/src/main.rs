@@ -317,6 +317,16 @@ pub struct DoctorReport {
 
 pub fn collect_doctor_report() -> DoctorReport {
     let is_root = unsafe { libc::geteuid() } == 0;
+    collect_doctor_report_with(is_root)
+}
+
+/// Coleta o relatório assumindo um dado nível de privilégio.
+///
+/// Separado de `collect_doctor_report` para permitir que os testes exercitem
+/// o caminho sem privilégio de forma incondicional — inclusive quando a suíte
+/// roda como root (CI, container), onde a checagem real de `geteuid` tornaria
+/// esse cenário inalcançável.
+pub fn collect_doctor_report_with(is_root: bool) -> DoctorReport {
     let mut checks = Vec::new();
     let mut has_fatal_error = false;
 
@@ -450,12 +460,41 @@ mod tests {
     fn test_collect_doctor_report_does_not_panic() {
         let report = collect_doctor_report();
         assert!(!report.checks.is_empty());
+    }
 
-        if !report.is_root {
-            assert!(!report.has_fatal_error, "doctor não deve gerar erro fatal sem privilégio");
-            let priv_check = report.checks.iter().find(|c| c.line.contains("Não está rodando como root"));
-            assert!(priv_check.is_some());
-            assert_eq!(priv_check.unwrap().status, CheckStatus::Warn);
-        }
+    #[test]
+    fn test_doctor_reports_missing_privilege_without_panicking() {
+        // Força o caminho sem privilégio independentemente do usuário que roda
+        // a suíte. É este o cenário que o SCC-16 (A5) exige provar: o usuário
+        // novo executa sem sudo e o doctor precisa avisar sem derrubar nada.
+        let report = collect_doctor_report_with(false);
+
+        assert!(!report.is_root);
+        assert!(
+            !report.has_fatal_error,
+            "doctor não deve gerar erro fatal apenas por falta de privilégio"
+        );
+
+        let priv_check = report
+            .checks
+            .iter()
+            .find(|c| c.line.contains("Não está rodando como root"))
+            .expect("faltou a checagem de privilégio no relatório");
+
+        assert_eq!(priv_check.status, CheckStatus::Warn);
+    }
+
+    #[test]
+    fn test_doctor_reports_root_privilege() {
+        let report = collect_doctor_report_with(true);
+
+        assert!(report.is_root);
+        let priv_check = report
+            .checks
+            .iter()
+            .find(|c| c.line.contains("Rodando como root"))
+            .expect("faltou a checagem de privilégio no relatório");
+
+        assert_eq!(priv_check.status, CheckStatus::Ok);
     }
 }
