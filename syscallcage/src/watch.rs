@@ -60,6 +60,22 @@ pub fn parse_c_command(args: &[String]) -> Result<Vec<CString>, (usize, String)>
     Ok(c_args)
 }
 
+/// Verifica se o pai atual é o mesmo de antes do fork, para evitar orfandade.
+pub fn check_parent_alive(original_ppid: libc::pid_t) -> bool {
+    let current_ppid = unsafe { libc::getppid() };
+    current_ppid == original_ppid
+}
+
+/// Aguarda a liberação bloqueando num pipe. Retorna erro se o pipe fechar sem o byte.
+pub fn await_parent_release(read_fd: std::os::fd::RawFd) -> Result<(), std::io::Error> {
+    let mut buf = [0u8; 1];
+    let n = nix::unistd::read(read_fd, &mut buf)?;
+    if n == 0 {
+        return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "pipe fechado pelo pai sem liberação"));
+    }
+    Ok(())
+}
+
 pub fn run(config: WatchConfig) -> Result<(), WatchError> {
     let policy = config.policy;
     let mut restart_count = 0u32;
@@ -72,12 +88,43 @@ pub fn run(config: WatchConfig) -> Result<(), WatchError> {
             }
         }
 
+        let parent_pid_antes = unsafe { libc::getpid() };
+        let mut fds = [-1, -1];
+        if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
+            let e = nix::Error::last();
+            logging::fatal("watch", &format!("falha ao criar pipe de sincronização: {}", e));
+            return Err(WatchError::Errno(e));
+        }
+        let read_fd = fds[0];
+        let write_fd = fds[1];
+
         match unsafe { fork()? } {
             ForkResult::Child => {
+                if let Err(e) = nix::unistd::close(write_fd) {
+                    logging::fatal("watch", &format!("falha ao fechar write_fd no filho: {}", e));
+                    std::process::exit(127);
+                }
+                
                 if let Err(e) = set_parent_death_signal() {
                     logging::fatal("watch", &format!("falha ao configurar PR_SET_PDEATHSIG: {}", e));
                     std::process::exit(127);
                 }
+                
+                if !check_parent_alive(parent_pid_antes) {
+                    logging::fatal("watch", "pai morreu durante o fork, abortando inicialização (evita orfandade)");
+                    std::process::exit(127);
+                }
+                
+                if let Err(e) = await_parent_release(read_fd) {
+                    logging::fatal("watch", &format!("pai abortou a inicialização do monitor: {}", e));
+                    std::process::exit(127);
+                }
+                
+                if let Err(e) = nix::unistd::close(read_fd) {
+                    logging::fatal("watch", &format!("falha ao fechar read_fd no filho: {}", e));
+                    std::process::exit(127);
+                }
+
                 let c_command = match parse_c_command(&config.command) {
                     Ok(cmd) => cmd,
                     Err((idx, err)) => {
@@ -96,6 +143,10 @@ pub fn run(config: WatchConfig) -> Result<(), WatchError> {
                 std::process::exit(127);
             }
             ForkResult::Parent { child } => {
+                if let Err(e) = nix::unistd::close(read_fd) {
+                    logging::fatal("watch", &format!("falha ao fechar read_fd no pai: {}", e));
+                }
+
                 let pid = child.as_raw() as u32;
                 logging::log(logging::Entry {
                     timestamp: logging::get_timestamp(),
@@ -132,11 +183,36 @@ pub fn run(config: WatchConfig) -> Result<(), WatchError> {
                     }
                 };
 
-                // Anexa os hooks eBPF assim que o PID do filho nasce, antes
-                // de qualquer waitpid -- anexar depois de esperar o filho
-                // terminar seria tarde demais.
-                let monitor = Arc::new(Monitor::new(pid, &policy, handler)?);
+                let monitor = match Monitor::new(pid, &policy, handler) {
+                    Ok(m) => Arc::new(m),
+                    Err(e) => {
+                        if let Err(err_close) = nix::unistd::close(write_fd) {
+                            logging::log(logging::Entry {
+                                timestamp: logging::get_timestamp(),
+                                level: "warn",
+                                component: "watch",
+                                message: &format!("falha ao fechar write_fd após erro no monitor: {}", err_close),
+                                pid: Some(pid),
+                                event_type: None,
+                                target: None,
+                                action: None,
+                            });
+                        }
+                        return Err(WatchError::Monitor(e));
+                    }
+                };
+
+                if let Err(e) = nix::unistd::write(write_fd, &[1]) {
+                    logging::fatal("watch", &format!("falha ao sinalizar liberação para o filho: {}", e));
+                    // Tentativa de fechar, mas sem abafar erro ou travar (se write falhou, pipe pode estar quebrado)
+                    let _ = nix::unistd::close(write_fd);
+                    return Err(WatchError::Errno(e));
+                }
                 
+                if let Err(e) = nix::unistd::close(write_fd) {
+                    logging::fatal("watch", &format!("falha ao fechar write_fd no pai após liberação: {}", e));
+                }
+
                 let monitor_clone = monitor.clone();
                 std::thread::spawn(move || {
                     if let Err(e) = monitor_clone.start() {
@@ -225,5 +301,41 @@ mod tests {
         assert!(res.is_err());
         let (idx, _err) = res.unwrap_err();
         assert_eq!(idx, 0);
+    }
+
+    #[test]
+    fn test_check_parent_alive() {
+        let me = unsafe { libc::getpid() };
+        // Passando meu próprio PID fingindo ser o "pai original"
+        assert!(!check_parent_alive(me));
+        
+        // Passando meu ppid real
+        let real_ppid = unsafe { libc::getppid() };
+        assert!(check_parent_alive(real_ppid));
+    }
+
+    #[test]
+    fn test_await_parent_release_success() {
+        let mut fds = [-1, -1];
+        unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) };
+        let read_fd = fds[0];
+        let write_fd = fds[1];
+        nix::unistd::write(write_fd, &[1]).unwrap();
+        assert!(await_parent_release(read_fd).is_ok());
+        nix::unistd::close(write_fd).unwrap();
+        nix::unistd::close(read_fd).unwrap();
+    }
+
+    #[test]
+    fn test_await_parent_release_eof() {
+        let mut fds = [-1, -1];
+        unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) };
+        let read_fd = fds[0];
+        let write_fd = fds[1];
+        nix::unistd::close(write_fd).unwrap(); // Simula morte do pai ou falha do eBPF
+        let res = await_parent_release(read_fd);
+        assert!(res.is_err());
+        assert_eq!(res.unwrap_err().kind(), std::io::ErrorKind::UnexpectedEof);
+        nix::unistd::close(read_fd).unwrap();
     }
 }
