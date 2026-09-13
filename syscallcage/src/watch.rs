@@ -81,13 +81,6 @@ pub fn run(config: WatchConfig) -> Result<(), WatchError> {
     let mut restart_count = 0u32;
 
     loop {
-        if let Some(max) = config.max_restarts {
-            if restart_count >= max {
-                logging::fatal("watch", "número máximo de reinícios atingido, encerrando supervisão");
-                return Err(WatchError::MaxRestartsExceeded);
-            }
-        }
-
         let parent_pid_antes = unsafe { libc::getpid() };
         let mut fds = [-1, -1];
         if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
@@ -232,28 +225,71 @@ pub fn run(config: WatchConfig) -> Result<(), WatchError> {
                             );
                             return Err(WatchError::PolicyViolationHalt);
                         }
+                        let max = config.max_restarts.unwrap_or(0);
+                        if restart_count >= max {
+                            logging::log(logging::Entry {
+                                timestamp: logging::get_timestamp(),
+                                level: "warn",
+                                component: "watch",
+                                message: &format!("agente encerrado pelo sinal {:?}, supervisão finalizada", sig),
+                                pid: Some(pid),
+                                event_type: None,
+                                target: None,
+                                action: None,
+                            });
+                            return Ok(());
+                        }
                         logging::log(logging::Entry {
                             timestamp: logging::get_timestamp(),
                             level: "warn",
                             component: "watch",
-                            message: &format!("agente encerrado pelo sinal {:?}, reiniciando", sig),
+                            message: &format!("agente encerrado pelo sinal {:?}, reiniciando ({}/{})", sig, restart_count + 1, max),
                             pid: Some(pid),
                             event_type: None,
                             target: None,
                             action: None,
                         });
+                        std::thread::sleep(std::time::Duration::from_millis(1000));
                     }
                     WaitStatus::Exited(_, code) => {
+                        if code == 0 {
+                            logging::log(logging::Entry {
+                                timestamp: logging::get_timestamp(),
+                                level: "info",
+                                component: "watch",
+                                message: "agente finalizou com sucesso (código 0), encerrando supervisão",
+                                pid: Some(pid),
+                                event_type: None,
+                                target: None,
+                                action: None,
+                            });
+                            return Ok(());
+                        }
+                        let max = config.max_restarts.unwrap_or(0);
+                        if restart_count >= max {
+                            logging::log(logging::Entry {
+                                timestamp: logging::get_timestamp(),
+                                level: "warn",
+                                component: "watch",
+                                message: &format!("agente encerrou com erro (código {}), supervisão finalizada", code),
+                                pid: Some(pid),
+                                event_type: None,
+                                target: None,
+                                action: None,
+                            });
+                            return Ok(());
+                        }
                         logging::log(logging::Entry {
                             timestamp: logging::get_timestamp(),
                             level: "warn",
                             component: "watch",
-                            message: &format!("agente encerrou com código {}, reiniciando", code),
+                            message: &format!("agente encerrou com código {}, reiniciando ({}/{})", code, restart_count + 1, max),
                             pid: Some(pid),
                             event_type: None,
                             target: None,
                             action: None,
                         });
+                        std::thread::sleep(std::time::Duration::from_millis(1000));
                     }
                     _ => {}
                 }

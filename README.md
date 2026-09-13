@@ -52,7 +52,37 @@ curl -fsSL https://raw.githubusercontent.com/rodrigoffreir3/syscallcage/main/ins
 
 Isso instala em `~/.local/bin`, sem exigir `sudo` para o passo de instalação em si. Ao final, confira o ambiente com `syscallcage doctor`.
 
-*(A URL acima usa o GitHub diretamente — é a versão honesta de "funciona hoje". Um domínio próprio é melhoria futura documentada no roadmap.)*
+> [!TIP]
+> **Acesso direto via `sudo`:**
+> Por padrão de segurança no Linux, o comando `sudo` utiliza um `PATH` próprio (`secure_path`) que ignora diretórios de usuário como `~/.local/bin`. Para que você possa rodar `sudo syscallcage` direto de qualquer lugar sem o erro `command not found`, crie um link simbólico no sistema:
+> ```bash
+> sudo ln -sf ~/.local/bin/syscallcage /usr/local/bin/syscallcage
+> sudo ln -sf ~/.local/bin/syscallcage-ebpf /usr/local/bin/syscallcage-ebpf
+> ```
+
+### Ativando o BPF LSM no Linux (Modo Síncrono Preventivo)
+
+O SyscallCage funciona imediatamente em modo reativo (abate o processo na hora caso ocorra violação). Para ativar o bloqueio **síncrono e preventivo** (onde a chamada do agente é barrada pelo kernel *antes* de executar), ative o módulo `bpf` no boot da sua distribuição Linux:
+
+1. Abra `/etc/default/grub` como administrador:
+   ```bash
+   sudo nano /etc/default/grub
+   ```
+2. Adicione `lsm=landlock,lockdown,yama,integrity,apparmor,bpf` na variável `GRUB_CMDLINE_LINUX_DEFAULT`:
+   ```bash
+   GRUB_CMDLINE_LINUX_DEFAULT="quiet splash lsm=landlock,lockdown,yama,integrity,apparmor,bpf"
+   ```
+3. Atualize o GRUB e reinicie o computador:
+   ```bash
+   sudo update-grub
+   sudo reboot
+   ```
+4. Ao reiniciar, confirme com `syscallcage doctor`:
+   ```text
+   ✓ BPF LSM disponível — modo síncrono (recomendado) será usado.
+   ```
+
+*(A URL do instalador acima usa o GitHub diretamente — é a versão honesta de "funciona hoje". Um domínio próprio é melhoria futura documentada no roadmap.)*
 
 ### Instalando a partir do código-fonte
 
@@ -135,6 +165,64 @@ Vamos abrir ele. Cada parte tem um motivo:
 
 Se um dia você precisar pesquisar sobre isso no Google, já sabe o nome de cada peça: "PID", "sudo", "flag de linha de comando". Isso ajuda muito mais que decorar o comando inteiro sem entender.
 
+## Como encontrar o processo (PID) da IA e vinculá-lo
+
+O **PID** (*Process Identifier*) é o identificador numérico único que o Linux atribui a qualquer programa em execução. Como agentes e modelos de IA podem rodar de diferentes formas (extensões de IDE, ferramentas de linha de comando ou servidores locais), aqui estão as formas mais práticas de localizá-los e colocá-los sob a vigilância do SyscallCage:
+
+### 1. Descobrindo qual é o processo do seu agente
+
+Dependendo de como você usa IA no seu fluxo de trabalho:
+
+- **Assistentes e extensões de IDE (Cursor, Antigravity, VS Code, Windsurf):**  
+  Essas ferramentas operam criando processos de backend em segundo plano, normalmente chamados de *Language Servers* ou servidores de extensão.
+  - Para localizar:
+    ```bash
+    pgrep -fl language_server
+    ```
+    ou procurando por processos de servidor da IDE:
+    ```bash
+    pgrep -fl cursor
+    pgrep -fl code
+    ```
+
+- **Agentes de terminal / CLI (Claude Code, Aider, OpenHands, Goose):**  
+  Executam como comandos diretos ou scripts Node/Python.
+  - Para localizar:
+    ```bash
+    pgrep -fl claude
+    pgrep -fl aider
+    pgrep -fl python
+    ```
+
+- **Servidores locais de modelos (Ollama, LocalAI, vLLM):**  
+  - Para localizar:
+    ```bash
+    pgrep -fl ollama
+    ```
+
+> [!TIP]
+> O parâmetro `-fl` no `pgrep` lista o **PID** junto com o **nome completo da linha de comando** que iniciou o processo, facilitando confirmar se você está selecionando o agente correto.
+
+Se preferir ver tudo graficamente no terminal, você também pode abrir o `htop` (ou `btop`), pressionar `F3` (ou `/`), digitar o nome do processo e olhar o número na coluna **PID**.
+
+### 2. Vinculando o processo ao SyscallCage
+
+Com o PID identificado, você pode vinculá-lo de duas formas:
+
+- **Informando o PID diretamente:**
+  ```bash
+  sudo syscallcage --pid 12345 --policy minha-politica.yaml
+  ```
+
+- **Vinculando automaticamente em um comando só:**  
+  Se você já sabe o nome do processo e quer engatar a proteção direto sem precisar copiar e colar o número:
+  ```bash
+  sudo syscallcage --pid $(pgrep -f language_server | head -n 1) --policy minha-politica.yaml
+  ```
+  *(O trecho `$(pgrep -f ... | head -n 1)` resolve o PID em tempo real e o repassa como argumento).*
+
+Pronto! A partir desse momento, todas as chamadas de sistema (leitura/escrita de arquivos, comandos e acessos) feitas pelo processo do agente são monitoradas e contidas pelo kernel.
+
 ## O modo `watch` — a versão sem precisar descobrir PID
 
 ```bash
@@ -149,6 +237,46 @@ Esse modo elimina o passo mais chato (achar o PID manualmente): o SyscallCage cr
 - **`claude-code --seus-argumentos`** — o comando que você normalmente usaria pra rodar seu agente, exatamente do jeito que você já usa hoje, só que precedido pelo SyscallCage.
 
 Nesse modo, você nunca precisa descobrir PID nenhum — o SyscallCage já nasce sabendo, porque é ele quem liga o agente.
+
+## Cenários Possíveis de Dúvidas / Ajustes de Ambiente
+
+Nem todo usuário vai passar por essas situações, mas caso você encontre algum desses cenários no seu ambiente, as soluções já estão mapeadas e prontas:
+
+### 1. `sudo: 'syscallcage': command not found`
+- **Por que acontece:** O `sudo` por padrão de segurança no Linux limpa as variáveis de ambiente (`secure_path`) e não busca executáveis em diretórios pessoais como `~/.local/bin`.
+- **Solução:** Crie um link simbólico dos binários para um diretório do sistema:
+  ```bash
+  sudo ln -sf ~/.local/bin/syscallcage /usr/local/bin/syscallcage
+  sudo ln -sf ~/.local/bin/syscallcage-ebpf /usr/local/bin/syscallcage-ebpf
+  ```
+
+### 2. `syscallcage doctor` avisa que o BPF LSM está indisponível (Fallback Reativo)
+- **Por que acontece:** Distribuições modernas (como Ubuntu 22.04/24.04+) já vêm com o kernel compilado com suporte a BPF LSM (`CONFIG_BPF_LSM=y`), mas o módulo `bpf` precisa ser explicitamente listado na ordem de inicialização do boot no GRUB para habilitar a contenção preventiva síncrona.
+- **Solução:**
+  1. No arquivo `/etc/default/grub`, adicione `lsm=landlock,lockdown,yama,integrity,apparmor,bpf` na variável `GRUB_CMDLINE_LINUX_DEFAULT`:
+     ```bash
+     GRUB_CMDLINE_LINUX_DEFAULT="quiet splash lsm=landlock,lockdown,yama,integrity,apparmor,bpf"
+     ```
+  2. Atualize o GRUB e reinicie o computador:
+     ```bash
+     sudo update-grub
+     sudo reboot
+     ```
+  3. Confirme o carregamento com `cat /sys/kernel/security/lsm` e `syscallcage doctor`.
+
+### 3. "Operation inhibited by user session" ao tentar reiniciar (`systemd-inhibit`)
+- **Por que acontece:** Se a sua interface gráfica de desktop (GNOME/KDE) estiver com aplicativos abertos, o `systemd` pode inibir o comando de reinicialização para evitar perda de dados.
+- **Solução:** Para reiniciar ignorando travas da sessão de usuário:
+  ```bash
+  sudo systemctl reboot -i
+  ```
+
+### 4. Regras em `syscalls.deny` caindo para modo reativo
+- **Por que acontece:** O compilador síncrono do BPF LSM atua nos ganchos de execução e espera que as regras de syscall sigam o formato com o prefixo da operação (ex: `execve:/bin/sh`, `execve:/bin/bash`). Padrões genéricos livres fora desse formato fazem o SyscallCage alternar de forma segura para o modo reativo.
+- **Solução:** Em políticas em modo síncrono (`enforce`), declare chamadas proibidas no formato `execve:<caminho>`.
+
+### 5. Finalização de Processos e o Modo `watch`
+- **Como funciona:** O `watch` supervisiona a execução do seu agente. Quando o comando finaliza com sucesso (`código 0`) ou encerra por erro/bloqueio, a supervisão é concluída imediatamente sem loops. Caso você queira que o supervisor reinicie comandos que falhem por instabilidade de rede ou falhas normais, basta usar a flag `--max-restarts <N>`.
 
 ## Importante saber
 

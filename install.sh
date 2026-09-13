@@ -34,12 +34,12 @@ latest_url="https://github.com/${REPO}/releases/latest/download/syscallcage-${ta
 tmp_dir=$(mktemp -d)
 
 echo "Baixando SyscallCage para ${target}..."
-curl -fsSL "$latest_url" -o "$tmp_dir/syscallcage.tar.gz"
-curl -fsSL "${latest_url}.sha256" -o "$tmp_dir/syscallcage.tar.gz.sha256"
+curl -fsSL "$latest_url" -o "$tmp_dir/syscallcage-${target}.tar.gz"
+curl -fsSL "${latest_url}.sha256" -o "$tmp_dir/syscallcage-${target}.tar.gz.sha256"
 
 # 4. Verifica checksum -- SEMPRE, nunca opcional, isso não é frescura
 cd "$tmp_dir"
-if ! sha256sum -c syscallcage.tar.gz.sha256 >/dev/null 2>&1; then
+if ! sha256sum -c "syscallcage-${target}.tar.gz.sha256" >/dev/null 2>&1; then
   echo "ERRO: checksum não confere. Download corrompido ou adulterado. Abortando." >&2
   rm -rf "$tmp_dir"
   exit 1
@@ -47,7 +47,7 @@ fi
 
 # 5. Extrai e instala
 mkdir -p "$INSTALL_DIR"
-tar -xzf syscallcage.tar.gz -C "$INSTALL_DIR"
+tar -xzf "syscallcage-${target}.tar.gz" -C "$INSTALL_DIR"
 chmod +x "$INSTALL_DIR/syscallcage" "$INSTALL_DIR/syscallcage-ebpf"
 rm -rf "$tmp_dir"
 
@@ -67,3 +67,8 @@ esac
 
 echo "SyscallCage instalado com sucesso."
 echo "Verifique o ambiente com: syscallcage doctor"
+echo ""
+echo "Dica para usar com 'sudo' (evita 'command not found' devido ao secure_path do Linux):"
+echo "    sudo ln -sf \"$INSTALL_DIR/syscallcage\" /usr/local/bin/syscallcage"
+echo "    sudo ln -sf \"$INSTALL_DIR/syscallcage-ebpf\" /usr/local/bin/syscallcage-ebpf"
+echo ""

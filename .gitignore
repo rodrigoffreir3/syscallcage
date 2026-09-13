@@ -27,3 +27,4 @@ historico-syscallcage/
 # Rust compilation target directory
 target/
 
+demo-cage/
