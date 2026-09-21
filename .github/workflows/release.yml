@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: cargo-bins/cargo-binstall@main
 
       - name: Instala toolchain Rust (stable + nightly p/ eBPF)
         run: |
@@ -28,7 +29,7 @@ jobs:
 
       - name: Instala bpf-linker e cross tooling
         run: |
-          cargo install bpf-linker
+          cargo binstall --no-confirm bpf-linker
           sudo apt-get update && sudo apt-get install -y clang llvm gcc-aarch64-linux-gnu
 
       - name: Compila eBPF (bpfel-unknown-none, sempre native, não cross)
